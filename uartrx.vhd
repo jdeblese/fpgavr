@@ -72,7 +72,7 @@ begin
 	-- On a falling edge, enable the divider. When the count hits 10,
 	-- disable the divider and output the data
 	ctrl : process(rst,clk)
-		old : std_logic;
+		variable old : std_logic;
 	begin
 		if rst = '1' then
 			div_en <= '0';

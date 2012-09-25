@@ -18,7 +18,7 @@ ARCHITECTURE behavior OF uartrx_tb IS
 			ferror : out std_logic;
 			clk    : in STD_LOGIC;
 			rst    : in STD_LOGIC);
-	end uartrx;
+	end component;
 
 	--Inputs
 	signal rx : std_logic := '1';

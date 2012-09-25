@@ -2,20 +2,14 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
--- Uncomment the following library declaration if using
--- arithmetic functions with Signed or Unsigned values
---use IEEE.NUMERIC_STD.ALL;
-
--- Uncomment the following library declaration if instantiating
--- any Xilinx primitives in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
+library UNISIM;
+use UNISIM.VComponents.all;
 
 entity readfsm is
 	Port (
 		rs232_rx : in std_logic;
-		ringaddr : in std_logic(11 downto 0);
-		ringdata : out std_logic(7 downto 0);
+		ringaddr : in std_logic_vector(11 downto 0);
+		ringdata : out std_logic_vector(7 downto 0);
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end readfsm;
@@ -32,16 +26,16 @@ architecture Behavioral of readfsm is
 	end component;
 
 	signal rxstrobe : std_logic;
-	signal rxdata : std_logic(7 downto 0);
+	signal rxdata : std_logic_vector(7 downto 0);
 	signal rxerror : std_logic;
 
-	signal ringptr : std_logic(11 downto 0);
+	signal ringptr : std_logic_vector(11 downto 0);
 	signal ring_wr : std_logic;
 
-	signal ADDRA : std_logic(14 downto 0);
-	signal DATAA : std_logic(32 downto 0);
-	signal ADDRB : std_logic(14 downto 0);
-	signal DATAB : std_logic(32 downto 0);
+	signal ADDRA : std_logic_vector(14 downto 0);
+	signal DATAA : std_logic_vector(32 downto 0);
+	signal ADDRB : std_logic_vector(14 downto 0);
+	signal DATAB : std_logic_vector(32 downto 0);
 
 begin
 	urx : uartrx port map (rx => rs232_rx, strobe=>rxstrobe, data=>rxdata, ferror=>rxerror, clk=>clk, rst=>rst);
@@ -104,3 +98,5 @@ begin
 			end if;
 		end if;
 	end process;
+
+end Behavioral;

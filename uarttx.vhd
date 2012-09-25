@@ -11,9 +11,9 @@ use IEEE.STD_LOGIC_UNSIGNED.ALL;
 --library UNISIM;
 --use UNISIM.VComponents.all;
 
-entity uartrx is
+entity uarttx is
 	Port (
-		rx     : out std_logic;
+		tx     : out std_logic;
 		strobe : in std_logic;
 		data   : in std_logic_vector(7 downto 0);
 		clk    : in STD_LOGIC;
@@ -35,11 +35,11 @@ begin
 --		constant countto : std_logic_vector(13 downto 0) := "10100010110000";  -- Count to 10416,   9599.7 Hz @ 100 MHz
 	begin
 		if rst = '1' then
-			divcount <= & countto(13 downto 0) - "1";  -- Start at one tic before strobe
+			divcount <= countto(13 downto 0) - "1";  -- Start at one tic before strobe
 		elsif rising_edge(clk) then
 			divstrobe <= '0';
 			if div_en = '0' then
-				divcount <= & countto(13 downto 0) - "1";  -- Start at one tic before strobe
+				divcount <= countto(13 downto 0) - "1";  -- Start at one tic before strobe
 			elsif divcount = countto then
 				divcount <= (others => '0');
 				divstrobe <= '1';
