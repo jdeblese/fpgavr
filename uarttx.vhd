@@ -13,15 +13,14 @@ use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 entity uartrx is
 	Port (
-		rx     : in std_logic;
-		strobe : out std_logic;
-		data   : out std_logic_vector(7 downto 0);
-		ferror : out std_logic;
+		rx     : out std_logic;
+		strobe : in std_logic;
+		data   : in std_logic_vector(7 downto 0);
 		clk    : in STD_LOGIC;
 		rst    : in STD_LOGIC);
-end uartrx;
+end uarttx;
 
-architecture Behavioral of uartrx is
+architecture Behavioral of uarttx is
 	signal divcount  : std_logic_vector(13 downto 0);
 	signal divstrobe : std_logic;
 	signal div_en    : std_logic;
@@ -36,11 +35,11 @@ begin
 --		constant countto : std_logic_vector(13 downto 0) := "10100010110000";  -- Count to 10416,   9599.7 Hz @ 100 MHz
 	begin
 		if rst = '1' then
-			divcount <= '0' & countto(13 downto 1);  -- Start at half the value, to strobe midway in the bit
+			divcount <= & countto(13 downto 0) - "1";  -- Start at one tic before strobe
 		elsif rising_edge(clk) then
 			divstrobe <= '0';
 			if div_en = '0' then
-				divcount <= '0' & countto(13 downto 1);  -- Start at half the value, to strobe midway in the bit
+				divcount <= & countto(13 downto 0) - "1";  -- Start at one tic before strobe
 			elsif divcount = countto then
 				divcount <= (others => '0');
 				divstrobe <= '1';
@@ -50,50 +49,37 @@ begin
 		end if;
 	end process;
 
-	-- On internal strobe, shift data in and increment the counter
-	recv : process(rst,clk)
+	-- On internal strobe, shift data out and increment the counter
+	trans : process(rst,clk)
 	begin
 		if rst = '1' then
+			tx <= '1';
 			shifter <= (others => '0');
 			bitcount <= (others => '0');
 		elsif rising_edge(clk) then
 			if div_en = '1' then 
 				if divstrobe = '1' then
-					shifter <= rx & shifter(8 downto 1);
+					tx <= shifter(0);
+					shifter <= '1' & shifter(8 downto 1);
 					bitcount <= bitcount + "1";
 				end if;
 			else
 				bitcount <= (others => '0');
-				shifter <= (others => '0');
+				shifter <= data & '0';
 			end if;
 		end if;
 	end process;
 
-	-- On a falling edge, enable the divider. When the count hits 10,
-	-- disable the divider and output the data
+	-- Enable the divider on strobe
 	ctrl : process(rst,clk)
-		old : std_logic;
 	begin
 		if rst = '1' then
 			div_en <= '0';
-			data <= (others => '0');
-			ferror <= '0';
-			strobe <= '0';
-			old := '0';
 		elsif rising_edge(clk) then
-			strobe <= '0';
-			if div_en = '1' then
-				if bitcount = "1010" then
-					div_en <= '0';
-					data <= shifter(7 downto 0);
-					ferror <= not shifter(8);
-					strobe <= '1';
-				end if;
-			else
-				if old = '1' and rx = '0' then
-					div_en <= '1';
-				end if;
-				old := rx;
+			if div_en = '1' and bitcount = "1011" then  -- Terminate on bit 11, the second stop bit
+				div_en <= '0';
+			elsif strobe = '1' then
+				div_en <= '1';
 			end if;
 		end if;
 	end process;
