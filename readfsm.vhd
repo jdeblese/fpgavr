@@ -109,6 +109,7 @@ begin
 	ringdata <= DATAA(7 downto 0);
 
 	store : process(rst,clk)
+	variable old : std_logic;
 	begin
 		if rst = '1' then
 			ring_wr <= '0';
@@ -117,7 +118,10 @@ begin
 			ring_wr <= '0';
 			if rxstrobe = '1' then
 				ring_wr <= '1';
+				old := '1';
+			elsif old = '1' then
 				ringptr <= ringptr + "1";
+				old := '0';
 			end if;
 		end if;
 	end process;
