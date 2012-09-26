@@ -33,7 +33,7 @@ use UNISIM.VComponents.all;
 entity readfsm is
 	Port (
 		rs232_rx : in std_logic;
-		ringaddr : in std_logic_vector(11 downto 0);
+		ringaddr : in std_logic_vector(10 downto 0);
 		ringdata : out std_logic_vector(7 downto 0);
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
@@ -54,27 +54,25 @@ architecture Behavioral of readfsm is
 	signal rxdata : std_logic_vector(7 downto 0);
 	signal rxerror : std_logic;
 
-	signal ringptr : std_logic_vector(11 downto 0);
+	signal ringptr : std_logic_vector(10 downto 0);
 	signal ring_wr : std_logic;
 
-	signal ADDRA : std_logic_vector(14 downto 0);
-	signal DATAA : std_logic_vector(32 downto 0);
-	signal ADDRB : std_logic_vector(14 downto 0);
-	signal DATAB : std_logic_vector(32 downto 0);
+	signal ADDRA : std_logic_vector(13 downto 0);
+	signal DATAA : std_logic_vector(31 downto 0);
+	signal ADDRB : std_logic_vector(13 downto 0);
+	signal DATAB : std_logic_vector(31 downto 0);
 
 begin
 	urx : uartrx port map (rx => rs232_rx, strobe=>rxstrobe, data=>rxdata, ferror=>rxerror, clk=>clk, rst=>rst);
 
 	bootram : RAMB16BWER
 	generic map (
-		DATA_WIDTH_A => 8,
-		DATA_WIDTH_B => 8,
+		DATA_WIDTH_A => 9,
+		DATA_WIDTH_B => 9,
 		DOA_REG => 0,
 		DOB_REG => 0,
 		EN_RSTRAM_A => TRUE,
 		EN_RSTRAM_B => TRUE,
-		-- GB Bootstrap Rom
-		INIT_00 => X"0000000000000000000000000000000000000000000000000000000000000000",
 		INIT_FILE => "NONE",
 		RSTTYPE => "SYNC",
 		RST_PRIORITY_A => "CE",
