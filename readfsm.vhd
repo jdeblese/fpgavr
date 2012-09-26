@@ -96,7 +96,7 @@ begin
 		CLKB => clk,        -- 1-bit input: clock input
 		ADDRB => ADDRB,     -- 14-bit input: address input, low three are unused
 		ENB => ring_wr,     -- 1-bit input: enable input
-		WEB => "0001",      -- 4-bit input: byte-wide write enable input
+		WEB => "1111",      -- 4-bit input: byte-wide write enable input, must all be 1 or odd bytes won't be written
 		DIB => DATAB,       -- 32-bit input: data input
 		DIPB => "0000",     -- 4-bit input: parity input
 		REGCEB => '0',      -- 1-bit input: register clock enable input
