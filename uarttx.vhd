@@ -101,6 +101,7 @@ begin
 	begin
 		if rst = '1' then
 			div_en <= '0';
+			busy <= '0';
 		elsif rising_edge(clk) then
 			if div_en = '1' and bitcount = "1011" then  -- Terminate on bit 11, the second stop bit
 				div_en <= '0';
