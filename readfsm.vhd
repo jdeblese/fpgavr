@@ -35,6 +35,7 @@ entity readfsm is
 		rs232_rx : in std_logic;
 		ringaddr : in std_logic_vector(10 downto 0);
 		ringdata : out std_logic_vector(7 downto 0);
+		cmdstrobe : out std_logic;
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end readfsm;
@@ -54,7 +55,11 @@ architecture Behavioral of readfsm is
 	signal rxdata : std_logic_vector(7 downto 0);
 	signal rxerror : std_logic;
 
+	signal rxlen : std_logic_vector(15 downto 0);
+
 	signal ringptr : std_logic_vector(10 downto 0);
+	signal oldptr  : std_logic_vector(10 downto 0);
+	signal rewind  : std_logic;
 	signal ring_wr : std_logic;
 
 	signal ADDRA : std_logic_vector(13 downto 0);
@@ -62,8 +67,151 @@ architecture Behavioral of readfsm is
 	signal ADDRB : std_logic_vector(13 downto 0);
 	signal DATAB : std_logic_vector(31 downto 0);
 
+	signal cksum : std_logic_vector(7 downto 0);
+	signal cksum_en : std_logic;
+
+	type state_type is (st_start, st_seq, st_szhi, st_szlo, st_token, st_rcv, st_cksum, st_end, st_err);
+	signal state, next_state : state_type;
+
+
 begin
 	urx : uartrx port map (rx => rs232_rx, strobe=>rxstrobe, data=>rxdata, ferror=>rxerror, clk=>clk, rst=>rst);
+
+	calcsum : process(rst, clk)
+	begin
+		if rst = '1' then
+			cksum <= (others => '0');
+		elsif rising_edge(clk) then
+			if cksum_en = '0' then
+				cksum <= (others => '0');
+			elsif rxstrobe = '1' and state /= st_cksum then
+				cksum <= rxdata xor cksum;
+			end if;
+		end if;
+	end process;
+
+	sync_proc : process(rst,clk)
+	begin
+		if rst = '1' then
+			state <= st_start;
+		elsif rising_edge(clk) then
+			state <= next_state;
+		end if;
+	end process;
+
+	comb_proc : process(state,rxstrobe,rxdata)
+	begin
+
+		next_state <= state;
+		ring_wr <= '0';
+		cksum_en <= '1';
+		cmdstrobe <= '0';
+		rewind <= '0';
+
+		case state is
+			when st_start =>  -- Wait for a start byte
+				if rxstrobe = '1' and rxdata = X"1B" then
+					next_state <= st_seq;
+				end if;
+
+			when st_seq =>  -- Save the sequence number. Check?
+				if rxstrobe = '1' then
+					ring_wr <= '1';
+					next_state <= st_szhi;
+				end if;
+
+			when st_szhi =>  -- Read high byte of length
+				if rxstrobe = '1' then
+					ring_wr <= '1';
+					next_state <= st_szlo;
+				end if;
+
+			when st_szlo =>  -- Read low byte of length
+				if rxstrobe = '1' then
+					ring_wr <= '1';
+					next_state <= st_token;
+				end if;
+
+			when st_token =>  -- Check the token, jump to error if incorrect
+				if rxstrobe = '1' then
+					if rxdata = X"0E" then
+						next_state <= st_rcv;
+					else
+						next_state <= st_err;
+					end if;
+				end if;
+
+			when st_rcv =>  -- Save data as long as length > 0
+				if rxlen > "0" then
+					if rxstrobe = '1' then
+						ring_wr <= '1';
+					end if;
+				else
+					next_state <= st_cksum;
+				end if;
+
+			when st_cksum =>  -- Compare checksums, jump to error if they don't match
+				if rxstrobe = '1' then
+					cksum_en <= '0';
+					if rxdata = cksum then
+						cmdstrobe <= '1';
+						next_state <= st_start;
+					else
+						next_state <= st_err;
+					end if;
+				end if;
+
+			when st_err =>  -- Rewind the ring buffer pointer
+				rewind <= '1';
+				next_state <= st_start;
+
+			when others =>
+				next_state <= state;
+		end case;
+	end process;
+
+	-- Increment the ring buffer pointer when the buffer is written to, or rewind it when indicated
+	ptr_inc : process(rst,clk)
+	begin
+		if rst = '1' then
+			ringptr <= (others => '0');
+		elsif rising_edge(clk) then
+			if rewind = '1' then
+				ringptr <= oldptr;
+			elsif ring_wr = '1' then
+				ringptr <= ringptr + "1";
+			end if;
+		end if;
+	end process;
+
+	-- Store the value of the ring buffer pointer when starting a new receive cycle
+	ptr_old : process(rst, clk)
+	begin
+		if rst = '1' then
+			oldptr <= (others => '0');
+		elsif rising_edge(clk) then
+			if state = st_start then
+				oldptr <= ringptr;
+			end if;
+		end if;
+	end process;
+
+	savelen : process(rst,clk)
+	begin
+		if rst = '1' then
+			rxlen <= (others => '0');
+		elsif rising_edge(clk) then
+			if rxstrobe = '1' then
+				if state = st_szhi then
+					rxlen(15 downto 8) <= rxdata;
+				elsif state = st_szlo then
+					rxlen(7 downto 0) <= rxdata;
+				elsif state = st_rcv then
+					rxlen <= rxlen - "1";
+				end if;
+			end if;
+		end if;
+	end process;
 
 	bootram : RAMB16BWER
 	generic map (
@@ -107,23 +255,5 @@ begin
 	ADDRB <= ringptr & "000";
 	DATAB <= X"000000" & rxdata;
 	ringdata <= DATAA(7 downto 0);
-
-	store : process(rst,clk)
-	variable old : std_logic;
-	begin
-		if rst = '1' then
-			ring_wr <= '0';
-			ringptr <= (others => '0');
-		elsif rising_edge(clk) then
-			ring_wr <= '0';
-			if rxstrobe = '1' then
-				ring_wr <= '1';
-				old := '1';
-			elsif old = '1' then
-				ringptr <= ringptr + "1";
-				old := '0';
-			end if;
-		end if;
-	end process;
 
 end Behavioral;
