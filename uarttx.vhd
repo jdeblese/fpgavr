@@ -41,6 +41,7 @@ entity uarttx is
 		tx     : out std_logic;
 		strobe : in std_logic;
 		data   : in std_logic_vector(7 downto 0);
+		busy   : out std_logic;
 		clk    : in STD_LOGIC;
 		rst    : in STD_LOGIC);
 end uarttx;
@@ -103,8 +104,10 @@ begin
 		elsif rising_edge(clk) then
 			if div_en = '1' and bitcount = "1011" then  -- Terminate on bit 11, the second stop bit
 				div_en <= '0';
+				busy <= '0';
 			elsif strobe = '1' then
 				div_en <= '1';
+				busy <= '1';
 			end if;
 		end if;
 	end process;
