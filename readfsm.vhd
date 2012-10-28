@@ -32,29 +32,17 @@ use UNISIM.VComponents.all;
 
 entity readfsm is
 	Port (
-		rs232_rx : in std_logic;
+		uart_strobe : in std_logic;
+		uart_data : in std_logic_vector(7 downto 0);
 		ringaddr : in std_logic_vector(10 downto 0);
 		ringdata : out std_logic_vector(7 downto 0);
 		cmdstrobe : out std_logic;
+		readerr : out std_logic;
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end readfsm;
 
 architecture Behavioral of readfsm is
-	component uartrx
-		Port (
-			rx     : in std_logic;
-			strobe : out std_logic;
-			data   : out std_logic_vector(7 downto 0);
-			ferror : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
-	signal rxstrobe : std_logic;
-	signal rxdata : std_logic_vector(7 downto 0);
-	signal rxerror : std_logic;
-
 	signal rxlen : std_logic_vector(15 downto 0);
 
 	signal ringptr : std_logic_vector(10 downto 0);
@@ -75,7 +63,6 @@ architecture Behavioral of readfsm is
 
 
 begin
-	urx : uartrx port map (rx => rs232_rx, strobe=>rxstrobe, data=>rxdata, ferror=>rxerror, clk=>clk, rst=>rst);
 
 	calcsum : process(rst, clk)
 	begin
@@ -84,8 +71,8 @@ begin
 		elsif rising_edge(clk) then
 			if cksum_en = '0' then
 				cksum <= (others => '0');
-			elsif rxstrobe = '1' and state /= st_cksum then
-				cksum <= rxdata xor cksum;
+			elsif uart_strobe = '1' and state /= st_cksum then
+				cksum <= uart_data xor cksum;
 			end if;
 		end if;
 	end process;
@@ -99,7 +86,7 @@ begin
 		end if;
 	end process;
 
-	comb_proc : process(state,rxstrobe,rxdata)
+	comb_proc : process(state,uart_strobe,uart_data,rxlen,cksum)
 	begin
 
 		next_state <= state;
@@ -107,34 +94,35 @@ begin
 		cksum_en <= '1';
 		cmdstrobe <= '0';
 		rewind <= '0';
+		readerr <= '0';
 
 		case state is
 			when st_start =>  -- Wait for a start byte
-				if rxstrobe = '1' and rxdata = X"1B" then
+				if uart_strobe = '1' and uart_data = X"1B" then
 					next_state <= st_seq;
 				end if;
 
 			when st_seq =>  -- Save the sequence number. Check?
-				if rxstrobe = '1' then
+				if uart_strobe = '1' then
 					ring_wr <= '1';
 					next_state <= st_szhi;
 				end if;
 
 			when st_szhi =>  -- Read high byte of length
-				if rxstrobe = '1' then
+				if uart_strobe = '1' then
 					ring_wr <= '1';
 					next_state <= st_szlo;
 				end if;
 
 			when st_szlo =>  -- Read low byte of length
-				if rxstrobe = '1' then
+				if uart_strobe = '1' then
 					ring_wr <= '1';
 					next_state <= st_token;
 				end if;
 
 			when st_token =>  -- Check the token, jump to error if incorrect
-				if rxstrobe = '1' then
-					if rxdata = X"0E" then
+				if uart_strobe = '1' then
+					if uart_data = X"0E" then
 						next_state <= st_rcv;
 					else
 						next_state <= st_err;
@@ -143,7 +131,7 @@ begin
 
 			when st_rcv =>  -- Save data as long as length > 0
 				if rxlen > "0" then
-					if rxstrobe = '1' then
+					if uart_strobe = '1' then
 						ring_wr <= '1';
 					end if;
 				else
@@ -151,9 +139,9 @@ begin
 				end if;
 
 			when st_cksum =>  -- Compare checksums, jump to error if they don't match
-				if rxstrobe = '1' then
+				if uart_strobe = '1' then
 					cksum_en <= '0';
-					if rxdata = cksum then
+					if uart_data = cksum then
 						cmdstrobe <= '1';
 						next_state <= st_start;
 					else
@@ -163,7 +151,8 @@ begin
 
 			when st_err =>  -- Rewind the ring buffer pointer
 				rewind <= '1';
-				next_state <= st_start;
+				readerr <= '1';
+				next_state <= st_err;
 
 			when others =>
 				next_state <= state;
@@ -201,11 +190,11 @@ begin
 		if rst = '1' then
 			rxlen <= (others => '0');
 		elsif rising_edge(clk) then
-			if rxstrobe = '1' then
+			if uart_strobe = '1' then
 				if state = st_szhi then
-					rxlen(15 downto 8) <= rxdata;
+					rxlen(15 downto 8) <= uart_data;
 				elsif state = st_szlo then
-					rxlen(7 downto 0) <= rxdata;
+					rxlen(7 downto 0) <= uart_data;
 				elsif state = st_rcv then
 					rxlen <= rxlen - "1";
 				end if;
@@ -253,7 +242,7 @@ begin
 
 	ADDRA <= ringaddr & "000";
 	ADDRB <= ringptr & "000";
-	DATAB <= X"000000" & rxdata;
+	DATAB <= X"000000" & uart_data;
 	ringdata <= DATAA(7 downto 0);
 
 end Behavioral;

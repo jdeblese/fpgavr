@@ -43,18 +43,21 @@ entity dispatch is
 		txwr      : out std_logic;
 		txstrobe  : out std_logic;
 		txbusy    : in  std_logic;
+		procerr   : out std_logic;
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end dispatch;
 
 architecture Behavioral of dispatch is
 	type state_type is (st_start, st_err, st_getcmd,
+		st_getseq, st_getlen1, st_getlen2,
 	    st_signon1, st_signon2,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
 	signal state, next_state : state_type;
 	
 	signal inaddr : std_logic_vector(10 downto 0);
 	signal inread : std_logic;
+	signal inlen  : std_logic_vector(15 downto 0);
 
 	signal bytelen : std_logic_vector(16 downto 0);
 	signal byteinc : std_logic;
@@ -116,28 +119,48 @@ begin
 	end process;
 
 	-- FSM
-	comb_proc : process(state,cmdstrobe,ringdata,txbusy)
+	comb_proc : process(state,cmdstrobe,ringdata,txbusy,bytelen)
 	begin
 		
 		next_state <= state;
 		inread <= '0';
-		byteinc <= '1';
+		byteinc <= '0';
 		txaddr <= (others => '0');
 		txwr <= '0';
 		txdata <= (others => '0');
+		txstrobe <= '0';
+		procerr <= '0';
 		
 		case state is
 			when st_start =>  -- Wait for a command strobe
 				if cmdstrobe = '1' then
 					inread <= '1';
-					next_state <= st_getcmd;
+					next_state <= st_getseq;
 				end if;
 				
+			when st_getseq =>  -- Read in the sequence number, write to x0000
+				txaddr <= "000" & X"00";
+				txwr <= '1';
+				txdata <= ringdata;
+				inread <= '1';
+
+				next_state <= st_getlen1;
+
+			when st_getlen1 =>
+				inlen(15 downto 8) <= ringdata;
+				inread <= '1';
+				next_state <= st_getlen2;
+
+			when st_getlen2 =>
+				inlen(7 downto 0) <= ringdata;
+				inread <= '1';
+				next_state <= st_getcmd;
+
 			when st_getcmd =>  -- Read in the command
 				active_cmd <= ringdata;
 
-				-- Write the command to x0002
-				txaddr <= "000" & X"02";
+				-- Write the command to x0003
+				txaddr <= "000" & X"03";
 				txwr <= '1';
 				txdata <= ringdata;
 				byteinc <= '1';
@@ -149,8 +172,8 @@ begin
 				end if;
 
 			when st_signon1 =>
-				-- Write OK to x0003
-				txaddr <= "000" & X"03";
+				-- Write OK to x0004
+				txaddr <= "000" & X"04";
 				txwr <= '1';
 				txdata <= STATUS_CMD_OK;
 				byteinc <= '1';
@@ -158,8 +181,8 @@ begin
 				next_state <= st_signon2;
 
 			when st_signon2 =>
-				-- Write string length 0 to x0004
-				txaddr <= "000" & X"04";
+				-- Write string length 0 to x0005
+				txaddr <= "000" & X"05";
 				txwr <= '1';
 				txdata <= X"00";
 				byteinc <= '1';
@@ -167,13 +190,13 @@ begin
 				next_state <= st_fin1;
 
 			when st_fin1 =>
-				txaddr <= "000" & X"00";
+				txaddr <= "000" & X"01";
 				txwr <= '1';
 				txdata <= bytelen(15 downto 8);
 				next_state <= st_fin2;
 					
 			when st_fin2 =>
-				txaddr <= "000" & X"01";
+				txaddr <= "000" & X"02";
 				txwr <= '1';
 				txdata <= bytelen(7 downto 0);
 
@@ -195,6 +218,7 @@ begin
 				end if;
 
 			when st_err =>
+				procerr <= '1';
 				next_state <= st_err;
 			
 			when others =>
