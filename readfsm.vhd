@@ -56,9 +56,10 @@ architecture Behavioral of readfsm is
 	signal DATAB : std_logic_vector(31 downto 0);
 
 	signal cksum : std_logic_vector(7 downto 0);
-	signal cksum_en : std_logic;
 
-	type state_type is (st_start, st_seq, st_szhi, st_szlo, st_token, st_rcv, st_cksum, st_end, st_err);
+	type state_type is (st_start0, st_start1, st_seq0, st_seq1,
+		st_szhi0, st_szhi1, st_szlo0, st_szlo1, st_token0, st_token1,
+		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_end, st_err);
 	signal state, next_state : state_type;
 
 
@@ -69,9 +70,9 @@ begin
 		if rst = '1' then
 			cksum <= (others => '0');
 		elsif rising_edge(clk) then
-			if cksum_en = '0' then
+			if state = st_start0 then
 				cksum <= (others => '0');
-			elsif uart_strobe = '1' and state /= st_cksum then
+			elsif state = st_start1 or state = st_seq1 or state = st_szhi1 or state = st_szlo1 or state = st_token1 or state = st_rcv1 then
 				cksum <= uart_data xor cksum;
 			end if;
 		end if;
@@ -80,8 +81,8 @@ begin
 	sync_proc : process(rst,clk)
 	begin
 		if rst = '1' then
-			state <= st_start;
-		elsif rising_edge(clk) then
+			state <= st_start0;
+		elsif falling_edge(clk) then
 			state <= next_state;
 		end if;
 	end process;
@@ -91,63 +92,81 @@ begin
 
 		next_state <= state;
 		ring_wr <= '0';
-		cksum_en <= '1';
-		cmdstrobe <= '0';
 		rewind <= '0';
 		readerr <= '0';
 
 		case state is
-			when st_start =>  -- Wait for a start byte
+			when st_start0 =>  -- Wait for a start byte
 				if uart_strobe = '1' and uart_data = X"1B" then
-					next_state <= st_seq;
+					next_state <= st_start1;
 				end if;
 
-			when st_seq =>  -- Save the sequence number. Check?
+			when st_start1 =>
+				next_state <= st_seq0;
+
+			when st_seq0 =>  -- Save the sequence number. Check vs local counter?
 				if uart_strobe = '1' then
-					ring_wr <= '1';
-					next_state <= st_szhi;
+					next_state <= st_seq1;
 				end if;
 
-			when st_szhi =>  -- Read high byte of length
+			when st_seq1 =>
+				ring_wr <= '1';
+				next_state <= st_szhi0;
+
+			when st_szhi0 =>
 				if uart_strobe = '1' then
-					ring_wr <= '1';
-					next_state <= st_szlo;
+					next_state <= st_szhi1;
 				end if;
 
-			when st_szlo =>  -- Read low byte of length
+			when st_szhi1 =>  -- Read high byte of length
+				ring_wr <= '1';
+				next_state <= st_szlo0;
+
+			when st_szlo0 =>
 				if uart_strobe = '1' then
-					ring_wr <= '1';
-					next_state <= st_token;
+					next_state <= st_szlo1;
 				end if;
 
-			when st_token =>  -- Check the token, jump to error if incorrect
+			when st_szlo1 =>  -- Read low byte of length
+				ring_wr <= '1';
+				next_state <= st_token0;
+
+			when st_token0 =>  -- Check the token, jump to error if incorrect
 				if uart_strobe = '1' then
-					if uart_data = X"0E" then
-						next_state <= st_rcv;
-					else
-						next_state <= st_err;
-					end if;
+					next_state <= st_token1;
 				end if;
 
-			when st_rcv =>  -- Save data as long as length > 0
-				if rxlen > "0" then
-					if uart_strobe = '1' then
-						ring_wr <= '1';
-					end if;
+			when st_token1 =>
+				if uart_data = X"0E" then
+					next_state <= st_rcv0;
 				else
-					next_state <= st_cksum;
+					next_state <= st_err;
 				end if;
 
-			when st_cksum =>  -- Compare checksums, jump to error if they don't match
+			when st_rcv0 =>
 				if uart_strobe = '1' then
-					cksum_en <= '0';
+					next_state <= st_rcv1;
+				end if;
+
+			when st_rcv1 =>  -- Save data as long as length > 0
+				ring_wr <= '1';
+				if rxlen = "0" then
+					next_state <= st_cksum0;
+				else
+					next_state <= st_rcv0;
+				end if;
+
+			when st_cksum0 =>  -- Compare checksums, jump to error if they don't match
+				if uart_strobe = '1' then
 					if uart_data = cksum then
-						cmdstrobe <= '1';
-						next_state <= st_start;
+						next_state <= st_cksum1;
 					else
 						next_state <= st_err;
 					end if;
 				end if;
+
+			when st_cksum1 =>
+				next_state <= st_start0;
 
 			when st_err =>  -- Rewind the ring buffer pointer
 				rewind <= '1';
@@ -159,12 +178,25 @@ begin
 		end case;
 	end process;
 
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			cmdstrobe <= '0';
+		elsif rising_edge(clk) then
+			if state = st_cksum1 then
+				cmdstrobe <= '1';
+			else
+				cmdstrobe <= '0';
+			end if;
+		end if;
+	end process;
+
 	-- Increment the ring buffer pointer when the buffer is written to, or rewind it when indicated
 	ptr_inc : process(rst,clk)
 	begin
 		if rst = '1' then
 			ringptr <= (others => '0');
-		elsif rising_edge(clk) then
+		elsif falling_edge(clk) then
 			if rewind = '1' then
 				ringptr <= oldptr;
 			elsif ring_wr = '1' then
@@ -179,7 +211,7 @@ begin
 		if rst = '1' then
 			oldptr <= (others => '0');
 		elsif rising_edge(clk) then
-			if state = st_start then
+			if state = st_start1 then
 				oldptr <= ringptr;
 			end if;
 		end if;
@@ -191,11 +223,11 @@ begin
 			rxlen <= (others => '0');
 		elsif rising_edge(clk) then
 			if uart_strobe = '1' then
-				if state = st_szhi then
+				if state = st_szhi1 then
 					rxlen(15 downto 8) <= uart_data;
-				elsif state = st_szlo then
+				elsif state = st_szlo1 then
 					rxlen(7 downto 0) <= uart_data;
-				elsif state = st_rcv then
+				elsif state = st_rcv1 then
 					rxlen <= rxlen - "1";
 				end if;
 			end if;

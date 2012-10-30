@@ -81,15 +81,17 @@ begin
 	uart_data <= data;
 
 	calcsum : process(rst, clk)
+		variable old : std_logic_vector(1 downto 0);
 	begin
 		if rst = '1' then
 			cksum <= (others => '0');
 		elsif rising_edge(clk) then
 			if active = '0' then
 				cksum <= (others => '0');
-			elsif tick = "01" and datamux /= "11" then
+			elsif old = "01" and tick = "10" and datamux /= "11" then
 				cksum <= data xor cksum;
 			end if;
+			old := tick;
 		end if;
 	end process;
 
@@ -101,7 +103,7 @@ begin
 		        cksum         when others;
 
 	-- Data mux driver
-	process(databyte)
+	process(databyte,datalen)
 	begin
 		if databyte = "0" & X"0000" then
 			datamux <= "00";  -- message start
@@ -155,7 +157,7 @@ begin
 			active <= '0';
 			uart_strobe <= '0';
 			tick <= "00";
-		elsif rising_edge(clk) then
+		elsif falling_edge(clk) then
 			uart_strobe <= '0';
 
 			if active = '0' and strobe = '1' then

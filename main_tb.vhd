@@ -305,6 +305,176 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
+	  wait for baud_period*100;
+
+	  RxD <= '0';  -- Transmit x1B
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x29
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x00
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x02
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x0e
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x03
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit x81
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
+	  RxD <= '0';  -- Transmit xBC
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '0';
+	  wait for baud_period;
+	  RxD <= '1';
+	  wait for baud_period;
+	  RxD <= '1'; -- Stop bit
+	  wait for baud_period;
+
       wait;
    end process;
 

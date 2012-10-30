@@ -49,12 +49,13 @@ entity dispatch is
 end dispatch;
 
 architecture Behavioral of dispatch is
-	type state_type is (st_start, st_err, st_getcmd,
-		st_getseq, st_getlen1, st_getlen2,
+	type state_type is (st_start, st_err, st_getcmd, st_storecmd, st_cmdunknown,
+	    st_getseq, st_storeseq, st_getlenhi, st_getlenlo,
+	    st_getparam1, st_getparam2,
 	    st_signon1, st_signon2,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
 	signal state, next_state : state_type;
-	
+
 	signal inaddr : std_logic_vector(10 downto 0);
 	signal inread : std_logic;
 	signal inlen  : std_logic_vector(15 downto 0);
@@ -62,26 +63,24 @@ architecture Behavioral of dispatch is
 	signal bytelen : std_logic_vector(16 downto 0);
 	signal byteinc : std_logic;
 
-	signal active_cmd : std_logic_vector(7 downto 0);
-
 	-- Parameters
-	constant BUILD_NUMBER : std_logic_vector := X"0001";
-	constant HW_VER       : std_logic_vector := X"01";
-	constant SW_VER       : std_logic_vector := X"0001";
-	signal stk_vtarget    : std_logic_vector(8 downto 0);
-	signal stk_vadjust    : std_logic_vector(8 downto 0);
-	signal stk_osc_pscale : std_logic_vector(8 downto 0);
-	signal stk_osc_cmatch : std_logic_vector(8 downto 0);
-	signal stk_sck_duration   : std_logic_vector(8 downto 0);
-	signal stk_topcard_detect : std_logic_vector(8 downto 0);
-	signal stk_status     : std_logic_vector(8 downto 0);
-	signal stk_data       : std_logic_vector(8 downto 0);
+	constant BUILD_NUMBER : std_logic_vector(15 downto 0) := X"0001";
+	constant HW_VER       : std_logic_vector(7 downto 0) := X"01";
+	constant SW_VER       : std_logic_vector(15 downto 0) := X"0001";
+	signal stk_vtarget    : std_logic_vector(7 downto 0);
+	signal stk_vadjust    : std_logic_vector(7 downto 0);
+	signal stk_osc_pscale : std_logic_vector(7 downto 0);
+	signal stk_osc_cmatch : std_logic_vector(7 downto 0);
+	signal stk_sck_duration   : std_logic_vector(7 downto 0);
+	signal stk_topcard_detect : std_logic_vector(7 downto 0);
+	signal stk_status     : std_logic_vector(7 downto 0);
+	signal stk_data       : std_logic_vector(7 downto 0);
 	signal stk_rst_polarity   : std_logic;
-	signal stk_init       : std_logic_vector(8 downto 0);
+	signal stk_init       : std_logic_vector(7 downto 0);
 
 begin
 	-- Address counter for the receive ring buffer
-	-- 
+	--
 	-- Increments the address on command, resets
 	-- to zero
 	ringaddr <= inaddr;
@@ -89,7 +88,7 @@ begin
 	begin
 		if rst = '1' then
 			inaddr <= (others => '0');
-		elsif rising_edge(clk) then
+		elsif falling_edge(clk) then
 			if inread = '1' then
 				inaddr <= inaddr + "1";
 			end if;
@@ -102,8 +101,36 @@ begin
 		if rst = '1' then
 			bytelen <= (others => '0');
 		elsif rising_edge(clk) then
-			if byteinc = '1' then
+			if state = st_start then
+				bytelen <= (others => '0');
+			elsif byteinc = '1' then
 				bytelen <= bytelen + "1";
+			end if;
+		end if;
+	end process;
+
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			inlen <= (others => '0');
+		elsif falling_edge(clk) then
+			if state = st_getlenhi then
+				inlen(15 downto 8) <= ringdata;
+			elsif state = st_getlenlo then
+				inlen(7 downto 0) <= ringdata;
+			end if;
+		end if;
+	end process;
+
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			txstrobe <= '0';
+		elsif rising_edge(clk) then
+			if state = st_fin3 then
+				txstrobe <= '1';
+			else
+				txstrobe <= '0';
 			end if;
 		end if;
 	end process;
@@ -113,7 +140,7 @@ begin
 	begin
 		if rst = '1' then
 			state <= st_start;
-		elsif rising_edge(clk) then
+		elsif falling_edge(clk) then
 			state <= next_state;
 		end if;
 	end process;
@@ -121,55 +148,58 @@ begin
 	-- FSM
 	comb_proc : process(state,cmdstrobe,ringdata,txbusy,bytelen)
 	begin
-		
+
 		next_state <= state;
 		inread <= '0';
 		byteinc <= '0';
 		txaddr <= (others => '0');
 		txwr <= '0';
 		txdata <= (others => '0');
-		txstrobe <= '0';
 		procerr <= '0';
-		
+
 		case state is
 			when st_start =>  -- Wait for a command strobe
 				if cmdstrobe = '1' then
-					inread <= '1';
 					next_state <= st_getseq;
 				end if;
-				
-			when st_getseq =>  -- Read in the sequence number, write to x0000
+
+			when st_getseq =>  -- Read in the sequence number
+				next_state <= st_storeseq;
+
+			when st_storeseq =>  -- write to x0000
+				inread <= '1';
 				txaddr <= "000" & X"00";
-				txwr <= '1';
 				txdata <= ringdata;
+				txwr <= '1';
+				next_state <= st_getlenhi;
+
+			when st_getlenhi =>
 				inread <= '1';
+				next_state <= st_getlenlo;
 
-				next_state <= st_getlen1;
-
-			when st_getlen1 =>
-				inlen(15 downto 8) <= ringdata;
-				inread <= '1';
-				next_state <= st_getlen2;
-
-			when st_getlen2 =>
-				inlen(7 downto 0) <= ringdata;
+			when st_getlenlo =>
 				inread <= '1';
 				next_state <= st_getcmd;
 
 			when st_getcmd =>  -- Read in the command
-				active_cmd <= ringdata;
+				next_state <= st_storecmd;
 
-				-- Write the command to x0003
+			when st_storecmd =>  -- Write to x0003
+				inread <= '1';
 				txaddr <= "000" & X"03";
-				txwr <= '1';
 				txdata <= ringdata;
+				txwr <= '1';
 				byteinc <= '1';
 
-				if ringdata = CMD_SIGN_ON then
-					next_state <= st_signon1;
-				else
-					next_state <= st_err;
-				end if;
+				case ringdata is
+					when CMD_SIGN_ON => next_state <= st_signon1;
+					when CMD_GET_PARAMETER =>
+						next_state <= st_getparam1;
+--						inread <= '1';
+					when others => next_state <= st_cmdunknown;
+				end case;
+
+			-- CMD_SIGN_ON
 
 			when st_signon1 =>
 				-- Write OK to x0004
@@ -189,26 +219,63 @@ begin
 
 				next_state <= st_fin1;
 
+			-- CMD_GET_PARAMETER
+
+			when st_getparam1 =>
+				-- Write status to x0004
+				txaddr <= "000" & X"04";
+				txwr <= '1';
+				byteinc <= '1';
+
+				if ringdata = PARAM_RESET_POLARITY then
+					txdata <= STATUS_CMD_FAILED;
+					next_state <= st_fin1;
+				else
+					txdata <= STATUS_CMD_OK;
+					next_state <= st_getparam2;
+				end if;
+
+			when st_getparam2 =>
+				inread <= '1';
+				-- Write parameter to x0005
+				txaddr <= "000" & X"05";
+				txwr <= '1';
+				byteinc <= '1';
+
+				case ringdata is
+					when PARAM_BUILD_NUMBER_LOW => txdata <= BUILD_NUMBER(7 downto 0);
+					when PARAM_BUILD_NUMBER_HIGH => txdata <= BUILD_NUMBER(15 downto 8);
+					when others => txdata <= ringdata;
+				end case;
+
+				next_state <= st_fin1;
+
+			-- Wrap-up
+
+			when st_cmdunknown =>
+				-- Write UNKNOWN to x0004
+				txaddr <= "000" & X"04";
+				txwr <= '1';
+				txdata <= STATUS_CMD_UNKNOWN;
+				byteinc <= '1';
+
+				next_state <= st_fin1;
+
 			when st_fin1 =>
 				txaddr <= "000" & X"01";
 				txwr <= '1';
 				txdata <= bytelen(15 downto 8);
 				next_state <= st_fin2;
-					
+
 			when st_fin2 =>
 				txaddr <= "000" & X"02";
 				txwr <= '1';
 				txdata <= bytelen(7 downto 0);
 
 				next_state <= st_fin3;
-					
+
 			when st_fin3 =>
-				txstrobe <= '1';
-				if txbusy = '0' then
-					next_state <= st_fin3;
-				else
-					next_state <= st_fin4;
-				end if;
+				next_state <= st_fin4;
 
 			when st_fin4 =>
 				if txbusy = '1' then
@@ -220,10 +287,10 @@ begin
 			when st_err =>
 				procerr <= '1';
 				next_state <= st_err;
-			
+
 			when others =>
 				next_state <= state;
 		end case;
 	end process;
-	
+
 end Behavioral;

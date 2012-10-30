@@ -1,4 +1,4 @@
-import sys
+import sys, logging
 from serial.serialposix import Serial
 import struct
 
@@ -95,7 +95,7 @@ PARAM_CONTROLLER_INIT   = '\x9F'
 # STK answer constants
 ANSWER_CKSUM_ERROR = '\xB0'
 
-__seq = 0
+__seq = 40
 
 def execute(serial, data) :
 	global __seq
@@ -105,25 +105,23 @@ def execute(serial, data) :
 
 	txbuf = bytearray(MESSAGE_START + '%c%c%c' % (__seq, len(data)>>8, len(data)%256) + TOKEN + data)
 	txbuf += '%c' % reduce(lambda a,b: a^b, txbuf)
-	print "Sending: "+str(repr(txbuf))
+	print " Sending: "+' '.join(['%2.2X'%c for c in txbuf])
 
 	serial.write(txbuf)
 
 	rxhead = serial.read(5)
 
 	assert len(rxhead) == 5
-	print "Received header: "+str(repr(rxhead))
+	print " Received header: "+' '.join(['%2.2X'%c for c in bytearray(rxhead)])
 	assert rxhead[0] == MESSAGE_START and rxhead[4] == TOKEN
 	(rxseq,rxlen) = struct.unpack('>xBHx', rxhead)
 	assert rxseq == __seq
 	rxdata = serial.read(rxlen)
-	print "Received data: "+str(repr(rxdata))
+	print " Received data: "+' '.join(['%2.2X'%c for c in bytearray(rxdata)])
 	assert len(rxdata) == rxlen
-	print "Checksum: "+str(repr(serial.read(1)))
+	print " Checksum: %2.2X"%struct.unpack('B',serial.read(1))
+	print " Shoud be: %X"%reduce(lambda a,b: a^b, bytearray(rxhead + rxdata))
 #	assert struct.unpack('B', serial.read(1)) == reduce(lambda a,b: a^b, bytearray(rxhead + rxdata))
-
-	for idx in range(0, rxlen) :
-		print ('%X' % struct.unpack('B',rxdata[idx])) + ('\n' if (idx%16) == 0 and idx > 0 else ('  ' if (idx%8) == 0 else ' '))
 
 	__seq = (__seq + 1 if __seq < 256 else 0)
 
@@ -131,7 +129,7 @@ def execute(serial, data) :
 
 def get_param(serial, param) :
 	ans = execute(serial, CMD_GET_PARAMETER + param)
-	assert len(ans) == 3
+	assert len(ans) >= 2  # Only 2 if failed
 	(cmd, stat, val) = struct.unpack('ccB', ans)
 	assert cmd == CMD_GET_PARAMETER
 	assert stat == STATUS_CMD_OK
@@ -148,9 +146,9 @@ if __name__ == "__main__" :
 	assert len(ans) == alen + 3
 	print "Device is '" + ans[3:] + "'"
 
-	sys.exit(0)
+	print 'HW Build %2.2X%2.2X' % (get_param(port, PARAM_BUILD_NUMBER_HIGH), get_param(port, PARAM_BUILD_NUMBER_LOW))
 
-	print 'Top card ID is 0x%2.2X' % get_param(PARAM_TOPCARD_DETECT)
-	print 'Hardware version is 0x%2.2X' % get_param(PARAM_HW_VER)
-	print 'Software version is %d.%d' % (get_param(PARAM_SW_MAJOR),get_param(PARAM_SW_MINOR))
+	print 'Top card ID is 0x%2.2X' % get_param(port, PARAM_TOPCARD_DETECT)
+	print 'Hardware version is 0x%2.2X' % get_param(port, PARAM_HW_VER)
+	print 'Software version is %d.%d' % (get_param(port, PARAM_SW_MAJOR),get_param(port, PARAM_SW_MINOR))
 
