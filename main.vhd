@@ -56,6 +56,7 @@ architecture Behavioral of main is
 			txstrobe  : out std_logic;
 			txbusy    : in  std_logic;
 			procerr   : out std_logic;
+			busyerr   : out std_logic;
 			clk      : in STD_LOGIC;
 			rst      : in STD_LOGIC);
 	end component;
@@ -98,19 +99,21 @@ architecture Behavioral of main is
 	signal rxfrerror : std_logic;
 	signal readfsmerr : std_logic;
 	signal dispatcherr : std_logic;
+	signal dispatchbusy : std_logic;
 
 begin
 
 	led(7) <= tubusy;
 	led(6) <= dtbusy;
-	led(5 downto 3) <= (others => '0');
+	led(5 downto 4) <= (others => '0');
 	led(0) <= rxfrerror;
 	led(1) <= readfsmerr;
 	led(2) <= dispatcherr;
+	led(3) <= dispatchbusy;
 
 	u1 : uartrx port map (RxD, urstrobe, urdata, rxfrerror, CLK, RST);
 	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, CLK, RST);
-	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, CLK, RST);
+	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, dispatchbusy, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);
 

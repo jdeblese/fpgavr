@@ -44,6 +44,7 @@ entity dispatch is
 		txstrobe  : out std_logic;
 		txbusy    : in  std_logic;
 		procerr   : out std_logic;
+		busyerr   : out std_logic;
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end dispatch;
@@ -131,6 +132,17 @@ begin
 				txstrobe <= '1';
 			else
 				txstrobe <= '0';
+			end if;
+		end if;
+	end process;
+
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			busyerr <= '0';
+		elsif falling_edge(clk) then
+			if cmdstrobe = '1' and state /= st_start then
+				busyerr <= '1';
 			end if;
 		end if;
 	end process;

@@ -77,6 +77,7 @@ ARCHITECTURE behavior OF main_tb IS
 			txstrobe  : out std_logic;
 			txbusy    : in  std_logic;
 			procerr   : out std_logic;
+			busyerr   : out std_logic;
 			clk      : in STD_LOGIC;
 			rst      : in STD_LOGIC);
 	end component;
@@ -119,6 +120,7 @@ ARCHITECTURE behavior OF main_tb IS
 	signal rxfrerror : std_logic;
 	signal readfsmerr : std_logic;
 	signal dispatcherr : std_logic;
+	signal dispatchbusy : std_logic;
 
 	signal RxD : std_logic := '1';
 	signal TxD : std_logic;
@@ -135,7 +137,7 @@ BEGIN
  
 	u1 : uartrx port map (RxD, urstrobe, urdata, rxfrerror, CLK, RST);
 	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, CLK, RST);
-	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, CLK, RST);
+	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, dispatchbusy, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);
 
