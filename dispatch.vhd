@@ -25,7 +25,8 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use IEEE.STD_LOGIC_UNSIGNED."+";
+use ieee.numeric_std.all;
 
 library UNISIM;
 use UNISIM.VComponents.all;
@@ -53,7 +54,7 @@ architecture Behavioral of dispatch is
 	    st_storeseq, st_getlenhi, st_getlenlo,
 	    st_getparam1, st_getparam2,
 	    st_setparam1, st_setparam2,
-	    st_signon1, st_signon2,
+	    st_signon1, st_signon2, st_signon3,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
 	signal state : state_type;
 
@@ -78,6 +79,11 @@ architecture Behavioral of dispatch is
 	signal stk_data       : std_logic_vector(7 downto 0);
 	signal stk_rst_polarity   : std_logic;
 	signal stk_init       : std_logic_vector(7 downto 0);
+
+	constant MSTRLEN : integer := 8;
+	type char_array is array (integer range<>) of std_logic_vector(7 downto 0);
+	constant MODEL : char_array(0 to MSTRLEN-1) := (X"41", X"56", X"52", X"49", X"53", X"50", X"5F", X"32");  -- AVRISP_2
+	signal strlen : integer;
 
 	signal tmp : std_logic_vector(7 downto 0);
 
@@ -155,16 +161,33 @@ begin
 					txdata <= STATUS_CMD_OK;
 					bytelen <= bytelen + "1";
 
+
 					state <= st_signon2;
 
 				when st_signon2 =>
 					-- Write string length 0 to x0005
 					txaddr <= "000" & X"05";
 					txwr <= '1';
-					txdata <= X"00";
 					bytelen <= bytelen + "1";
 
-					state <= st_fin1;
+					-- Transmit string length
+					txdata <= std_logic_vector(to_unsigned(MSTRLEN,8));
+					strlen <= MSTRLEN - 1;
+
+					state <= st_signon3;
+
+				when st_signon3 =>
+						txaddr <= std_logic_vector(to_unsigned(strlen + 6,11));  -- 6 preceeding bytes for header
+					txdata <= MODEL(strlen);
+					txwr <= '1';
+					bytelen <= bytelen + "1";
+
+					if strlen = 0 then
+						state <= st_fin1;
+					else
+						state <= st_signon3;
+						strlen <= strlen - 1;
+					end if;
 
 				-- CMD_GET_PARAMETER
 
@@ -221,7 +244,7 @@ begin
 					ringptr <= ringptr + "1";
 
 					if tmp = PARAM_RESET_POLARITY then
-						if ringdata = "0" then
+						if ringdata = X"00" then
 							stk_rst_polarity <= '0';
 						else
 							stk_rst_polarity <= '1';
