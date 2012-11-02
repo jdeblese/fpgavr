@@ -53,20 +53,24 @@ architecture Behavioral of uartrx is
 
 	signal bitcount : std_logic_vector(3 downto 0);
 	signal shifter  : std_logic_vector(8 downto 0);
+
+	signal lpf : std_logic_vector(3 downto 0);
+	signal lpf_out : std_logic;
+
+	signal count16 : std_logic_vector(3 downto 0);
+	signal strobe16 : std_logic;
 begin
 
-	-- Strobe at the center of each bit
+	-- Sample clock, strobe at the center of each bit
 	clkdiv : process(rst,clk)
-		constant countto : std_logic_vector(13 downto 0) := "00001101100011";  -- Count to   867, 115207   Hz @ 100 MHz
---		constant countto : std_logic_vector(13 downto 0) := "10100010110000";  -- Count to 10416,   9599.7 Hz @ 100 MHz
+		constant countto : std_logic_vector(13 downto 0) := "00000000110101";  -- Count to    53, 16*115740   Hz @ 100 MHz, error 0.468%
 	begin
 		if rst = '1' then
-			divcount <= '0' & countto(13 downto 1);  -- Start at half the value, to strobe midway in the bit
+			divcount <= (others => '0');
+			divstrobe <= '0';
 		elsif rising_edge(clk) then
 			divstrobe <= '0';
-			if div_en = '0' then
-				divcount <= '0' & countto(13 downto 1);  -- Start at half the value, to strobe midway in the bit
-			elsif divcount = countto then
+			if divcount = countto then
 				divcount <= (others => '0');
 				divstrobe <= '1';
 			else
@@ -75,7 +79,46 @@ begin
 		end if;
 	end process;
 
-	-- On internal strobe, shift data in and increment the counter
+	-- Lowpass-filter Rx
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			lpf <= (others => '1');
+			lpf_out <= '0';
+		elsif falling_edge(clk) then
+			if divstrobe = '1' then
+				lpf(0) <= rx;
+				lpf(3 downto 1) <= lpf(2 downto 0);
+				if (lpf(3) and lpf(2) and lpf(1) and lpf(0)) = '1' then
+					lpf_out <= '1';
+				elsif (lpf(3) or lpf(2) or lpf(1) or lpf(0)) = '0' then
+					lpf_out <= '0';
+				end if;
+			end if;
+		end if;
+	end process;
+
+	-- Divide sample clock by 16
+	process(rst,clk)
+	begin
+		if rst = '1' then
+			count16 <= (others => '0');
+			strobe16 <= '0';
+		elsif rising_edge(clk) then
+			strobe16 <= '0';
+			if div_en = '0' then
+				count16 <= X"0";
+			elsif divstrobe = '1' then
+				count16 <= count16 + "1";
+				-- Strobe divided clock midway in bit
+				if count16 = X"8" then
+					strobe16 <= '1';
+				end if;
+			end if;
+		end if;
+	end process;
+
+	-- On slow strobe, shift data in and increment the counter
 	recv : process(rst,clk)
 	begin
 		if rst = '1' then
@@ -83,13 +126,12 @@ begin
 			bitcount <= (others => '0');
 		elsif rising_edge(clk) then
 			if div_en = '1' then 
-				if divstrobe = '1' then
-					shifter <= rx & shifter(8 downto 1);
+				if strobe16 = '1' then
+					shifter <= lpf_out & shifter(8 downto 1);
 					bitcount <= bitcount + "1";
 				end if;
 			else
 				bitcount <= (others => '0');
-				shifter <= (others => '0');
 			end if;
 		end if;
 	end process;
@@ -115,11 +157,11 @@ begin
 					strobe <= '1';
 				end if;
 			else
-				if old = '1' and rx = '0' then
+				if old = '1' and lpf_out = '0' then
 					div_en <= '1';
 				end if;
-				old := rx;
 			end if;
+			old := lpf_out;
 		end if;
 	end process;
 
