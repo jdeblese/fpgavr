@@ -38,6 +38,7 @@ entity readfsm is
 		ringdata : out std_logic_vector(7 downto 0);
 		cmdstrobe : out std_logic;
 		readerr : out std_logic;
+		tokenerr : out std_logic;
 		clk      : in STD_LOGIC;
 		rst      : in STD_LOGIC);
 end readfsm;
@@ -59,7 +60,7 @@ architecture Behavioral of readfsm is
 
 	type state_type is (st_start0, st_start1, st_seq0, st_seq1,
 		st_szhi0, st_szhi1, st_szlo0, st_szlo1, st_token0, st_token1,
-		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_end, st_err);
+		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_end, st_tokenerr, st_ckerr);
 	signal state, next_state : state_type;
 
 
@@ -70,9 +71,9 @@ begin
 		if rst = '1' then
 			cksum <= (others => '0');
 		elsif rising_edge(clk) then
-			if state = st_start0 then
-				cksum <= (others => '0');
-			elsif state = st_start1 or state = st_seq1 or state = st_szhi1 or state = st_szlo1 or state = st_token1 or state = st_rcv1 then
+			if state = st_start1 then
+				cksum <= uart_data;
+			elsif state = st_seq1 or state = st_szhi1 or state = st_szlo1 or state = st_token1 or state = st_rcv1 then
 				cksum <= uart_data xor cksum;
 			end if;
 		end if;
@@ -94,6 +95,7 @@ begin
 		ring_wr <= '0';
 		rewind <= '0';
 		readerr <= '0';
+		tokenerr <= '0';
 
 		case state is
 			when st_start0 =>  -- Wait for a start byte
@@ -140,8 +142,13 @@ begin
 				if uart_data = X"0E" then
 					next_state <= st_rcv0;
 				else
-					next_state <= st_err;
+					next_state <= st_tokenerr;
 				end if;
+
+			when st_tokenerr =>
+				tokenerr <= '1';
+				next_state <= st_tokenerr;
+
 
 			when st_rcv0 =>
 				if uart_strobe = '1' then
@@ -161,17 +168,16 @@ begin
 					if uart_data = cksum then
 						next_state <= st_cksum1;
 					else
-						next_state <= st_err;
+						next_state <= st_ckerr;
 					end if;
 				end if;
 
 			when st_cksum1 =>
 				next_state <= st_start0;
 
-			when st_err =>  -- Rewind the ring buffer pointer
-				rewind <= '1';
+			when st_ckerr =>  -- Rewind the ring buffer pointer
 				readerr <= '1';
-				next_state <= st_err;
+				next_state <= st_ckerr;
 
 			when others =>
 				next_state <= state;
