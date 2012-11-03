@@ -68,16 +68,16 @@ architecture Behavioral of dispatch is
 	-- Parameters
 	constant BUILD_NUMBER : std_logic_vector(15 downto 0) := X"0001";
 	constant HW_VER       : std_logic_vector(7 downto 0) := X"01";
-	constant SW_VER       : std_logic_vector(15 downto 0) := X"0001";
-	signal stk_vtarget    : std_logic_vector(7 downto 0);
-	signal stk_vadjust    : std_logic_vector(7 downto 0);
-	signal stk_osc_pscale : std_logic_vector(7 downto 0);
-	signal stk_osc_cmatch : std_logic_vector(7 downto 0);
-	signal stk_sck_duration   : std_logic_vector(7 downto 0);
+	constant SW_VER       : std_logic_vector(15 downto 0) := X"0200";
+	signal stk_vtarget    : std_logic_vector(7 downto 0);  -- fixed-point 10x the voltage: 3.3V => 33
+	signal stk_vadjust    : std_logic_vector(7 downto 0);  -- fixed-point 10x the voltage: 3.3V => 33
+	signal stk_osc_pscale : std_logic_vector(7 downto 0);  -- AT90S8535 Timer, see data sheet
+	signal stk_osc_cmatch : std_logic_vector(7 downto 0);  -- AT90S8535 Timer, see data sheet
+	signal stk_sck_duration   : std_logic_vector(7 downto 0);  -- See formula in datasheet
 	signal stk_topcard_detect : std_logic_vector(7 downto 0);
-	signal stk_status     : std_logic_vector(7 downto 0);
 	signal stk_data       : std_logic_vector(7 downto 0);
-	signal stk_rst_polarity   : std_logic;
+	signal stk_rst_polarity   : std_logic;  -- RESET flag polarity
+	signal stk_status     : std_logic_vector(7 downto 0);
 	signal stk_init       : std_logic_vector(7 downto 0);
 
 	constant MSTRLEN : integer := 8;
@@ -107,6 +107,10 @@ begin
 			txwr <= '0';
 			txstrobe <= '0';
 			procerr <= '0';
+
+			stk_rst_polarity <= '1';
+			stk_init <= X"00";
+
 		elsif falling_edge(clk) then
 			txwr <= '0';
 			txstrobe <= '0';
@@ -160,7 +164,7 @@ begin
 					txwr <= '1';
 					txdata <= STATUS_CMD_OK;
 					bytelen <= bytelen + "1";
-
+					stk_init <= X"00";
 
 					state <= st_signon2;
 
@@ -197,7 +201,13 @@ begin
 					txwr <= '1';
 					bytelen <= bytelen + "1";
 
-					if ringdata = PARAM_RESET_POLARITY then
+					if ringdata = PARAM_VTARGET
+						or ringdata = PARAM_VADJUST
+						or ringdata = PARAM_OSC_PSCALE
+						or ringdata = PARAM_OSC_CMATCH
+						or ringdata = PARAM_TOPCARD_DETECT
+						or ringdata = PARAM_DATA
+						or ringdata = PARAM_RESET_POLARITY then
 						txdata <= STATUS_CMD_FAILED;
 						state <= st_fin1;
 					else
@@ -218,6 +228,8 @@ begin
 						when PARAM_HW_VER => txdata <= HW_VER;
 						when PARAM_SW_MAJOR => txdata <= SW_VER(15 downto 8);
 						when PARAM_SW_MINOR => txdata <= SW_VER(7 downto 0);
+						when PARAM_SCK_DURATION => txdata <= stk_sck_duration(7 downto 0);
+						when PARAM_CONTROLLER_INIT => txdata <= stk_init(7 downto 0);
 						when others => txdata <= X"00";
 					end case;
 
@@ -232,8 +244,10 @@ begin
 					ringptr <= ringptr + "1";
 					tmp <= ringdata;
 
-					if ringdata = PARAM_RESET_POLARITY then
-						txdata <= STATUS_CMD_OK;
+					if ringdata = PARAM_RESET_POLARITY
+						or ringdata = PARAM_SCK_DURATION
+						or ringdata = PARAM_CONTROLLER_INIT then
+						txdata <= STATUS_CMD_OK;  -- This critical path is slow
 						state <= st_setparam2;
 					else
 						txdata <= STATUS_CMD_FAILED;
@@ -249,6 +263,10 @@ begin
 						else
 							stk_rst_polarity <= '1';
 						end if;
+					elsif tmp = PARAM_SCK_DURATION then
+						stk_sck_duration <= ringdata;
+					elsif tmp = PARAM_CONTROLLER_INIT then
+						stk_init <= ringdata;
 					end if;
 					state <= st_fin1;
 
