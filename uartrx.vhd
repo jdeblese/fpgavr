@@ -25,11 +25,11 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use IEEE.STD_LOGIC_UNSIGNED."+";
 
 -- Uncomment the following library declaration if using
 -- arithmetic functions with Signed or Unsigned values
---use IEEE.NUMERIC_STD.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 -- Uncomment the following library declaration if instantiating
 -- any Xilinx primitives in this code.
@@ -47,23 +47,46 @@ entity uartrx is
 end uartrx;
 
 architecture Behavioral of uartrx is
-	signal divcount  : std_logic_vector(13 downto 0);
+	constant ndivcountbits : integer := 6;
+	signal divcount  : unsigned(ndivcountbits-1 downto 0);
 	signal divstrobe : std_logic;
 	signal div_en    : std_logic;
 
 	signal bitcount : std_logic_vector(3 downto 0);
 	signal shifter  : std_logic_vector(8 downto 0);
 
-	signal lpf : std_logic_vector(3 downto 0);
-	signal lpf_out : std_logic;
-
 	signal count16 : std_logic_vector(3 downto 0);
 	signal strobe16 : std_logic;
+
+	signal sreg : std_logic_vector(1 downto 0);
+	signal sync_out : std_logic;
+
+	attribute TIG : string;
+	attribute IOB : string;
+	attribute ASYNC_REG : string;
+	attribute SHIFT_EXTRACT : string;
+	attribute HBLKNM : string;
+
+	--  TIG="TRUE" - Specifies a timing ignore for the asynchronous input
+	--  IOB="FALSE" = Specifies to not place the register into the IOB allowing
+	--                both synchronization registers to exist in the same slice
+	--                allowing for the shortest propagation time between them
+--	attribute TIG of rx : signal is "TRUE";  -- Causes syntesis warning
+	attribute IOB of rx : signal is "FALSE";
+	--  ASYNC_REG="TRUE" - Specifies registers will be receiving asynchronous data
+	--                     input to allow for better timing simulation
+	--                     characteristics
+	--  SHIFT_EXTRACT="NO" - Specifies to the synthesis tool to not infer an SRL
+	--  HBLKNM="sync_reg" - Specifies to pack both registers into the same slice, called sync_reg
+	attribute ASYNC_REG of sreg : signal is "TRUE";
+	attribute SHIFT_EXTRACT of sreg : signal is "NO";
+	attribute HBLKNM of sreg : signal is "sync_reg";
+
 begin
 
 	-- Sample clock, strobe at the center of each bit
 	clkdiv : process(rst,clk)
-		constant countto : std_logic_vector(13 downto 0) := "00000000110101";  -- Count to    53, 16*115740   Hz @ 100 MHz, error 0.468%
+		constant countto : unsigned := to_unsigned(53,ndivcountbits);  -- Count to    53, 16*115740   Hz @ 100 MHz, error 0.468%
 	begin
 		if rst = '1' then
 			divcount <= (others => '0');
@@ -79,22 +102,15 @@ begin
 		end if;
 	end process;
 
-	-- Lowpass-filter Rx
-	process(rst,clk)
+	-- Resynchronize asynchronous input
+	process (rst,clk,divstrobe)
 	begin
 		if rst = '1' then
-			lpf <= (others => '1');
-			lpf_out <= '0';
-		elsif falling_edge(clk) then
-			if divstrobe = '1' then
-				lpf(0) <= rx;
-				lpf(3 downto 1) <= lpf(2 downto 0);
-				if (lpf(3) and lpf(2) and lpf(1) and lpf(0)) = '1' then
-					lpf_out <= '1';
-				elsif (lpf(3) or lpf(2) or lpf(1) or lpf(0)) = '0' then
-					lpf_out <= '0';
-				end if;
-			end if;
+			sreg <= (others => '1');
+			sync_out <= '1';
+		elsif rising_edge(clk) and divstrobe = '1' then
+			sync_out <= sreg(1);
+			sreg <= sreg(0) & rx;
 		end if;
 	end process;
 
@@ -125,9 +141,9 @@ begin
 			shifter <= (others => '0');
 			bitcount <= (others => '0');
 		elsif rising_edge(clk) then
-			if div_en = '1' then 
+			if div_en = '1' then
 				if strobe16 = '1' then
-					shifter <= lpf_out & shifter(8 downto 1);
+					shifter <= sync_out & shifter(8 downto 1);
 					bitcount <= bitcount + "1";
 				end if;
 			else
@@ -157,11 +173,11 @@ begin
 					strobe <= '1';
 				end if;
 			else
-				if old = '1' and lpf_out = '0' then
+				if old = '1' and sync_out = '0' then
 					div_en <= '1';
 				end if;
 			end if;
-			old := lpf_out;
+			old := sync_out;
 		end if;
 	end process;
 
