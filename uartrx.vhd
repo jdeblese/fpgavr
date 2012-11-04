@@ -58,30 +58,6 @@ architecture Behavioral of uartrx is
 	signal count16 : std_logic_vector(3 downto 0);
 	signal strobe16 : std_logic;
 
-	signal sreg : std_logic_vector(1 downto 0);
-	signal sync_out : std_logic;
-
-	attribute TIG : string;
-	attribute IOB : string;
-	attribute ASYNC_REG : string;
-	attribute SHIFT_EXTRACT : string;
-	attribute HBLKNM : string;
-
-	--  TIG="TRUE" - Specifies a timing ignore for the asynchronous input
-	--  IOB="FALSE" = Specifies to not place the register into the IOB allowing
-	--                both synchronization registers to exist in the same slice
-	--                allowing for the shortest propagation time between them
---	attribute TIG of rx : signal is "TRUE";  -- Causes syntesis warning
-	attribute IOB of rx : signal is "FALSE";
-	--  ASYNC_REG="TRUE" - Specifies registers will be receiving asynchronous data
-	--                     input to allow for better timing simulation
-	--                     characteristics
-	--  SHIFT_EXTRACT="NO" - Specifies to the synthesis tool to not infer an SRL
-	--  HBLKNM="sync_reg" - Specifies to pack both registers into the same slice, called sync_reg
-	attribute ASYNC_REG of sreg : signal is "TRUE";
-	attribute SHIFT_EXTRACT of sreg : signal is "NO";
-	attribute HBLKNM of sreg : signal is "sync_reg";
-
 begin
 
 	-- Sample clock, strobe at the center of each bit
@@ -99,18 +75,6 @@ begin
 			else
 				divcount <= divcount + "1";
 			end if;
-		end if;
-	end process;
-
-	-- Resynchronize asynchronous input
-	process (rst,clk,divstrobe)
-	begin
-		if rst = '1' then
-			sreg <= (others => '1');
-			sync_out <= '1';
-		elsif rising_edge(clk) and divstrobe = '1' then
-			sync_out <= sreg(1);
-			sreg <= sreg(0) & rx;
 		end if;
 	end process;
 
@@ -143,7 +107,7 @@ begin
 		elsif rising_edge(clk) then
 			if div_en = '1' then
 				if strobe16 = '1' then
-					shifter <= sync_out & shifter(8 downto 1);
+					shifter <= rx & shifter(8 downto 1);
 					bitcount <= bitcount + "1";
 				end if;
 			else
@@ -173,11 +137,11 @@ begin
 					strobe <= '1';
 				end if;
 			else
-				if old = '1' and sync_out = '0' then
+				if old = '1' and rx = '0' then
 					div_en <= '1';
 				end if;
 			end if;
-			old := sync_out;
+			old := rx;
 		end if;
 	end process;
 

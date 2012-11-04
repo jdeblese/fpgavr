@@ -101,6 +101,16 @@ architecture Behavioral of main is
 	signal readtokenerr : std_logic;
 	signal dispatcherr : std_logic;
 
+	component synchronizer is
+		Port (
+			async : in std_logic;
+			sync  : out std_logic;
+			clk    : in STD_LOGIC;
+			rst    : in STD_LOGIC);
+	end component;
+
+	signal syncrx : std_logic;
+
 begin
 
 	led(7) <= tubusy;
@@ -111,7 +121,8 @@ begin
 	led(2) <= dispatcherr;
 	led(3) <= readtokenerr;
 
-	u1 : uartrx port map (RxD, urstrobe, urdata, rxfrerror, CLK, RST);
+	u0 : synchronizer port map(RxD, syncrx, CLK, RST);
+	u1 : uartrx port map (syncrx, urstrobe, urdata, rxfrerror, CLK, RST);
 	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, readtokenerr, CLK, RST);
 	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
