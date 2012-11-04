@@ -60,7 +60,7 @@ architecture Behavioral of readfsm is
 
 	type state_type is (st_start0, st_start1, st_seq0, st_seq1,
 		st_szhi0, st_szhi1, st_szlo0, st_szlo1, st_token0, st_token1,
-		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_end, st_tokenerr, st_ckerr);
+		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_tokenerr, st_ckerr);
 	signal state, next_state : state_type;
 
 
@@ -240,7 +240,7 @@ begin
 		end if;
 	end process;
 
-	bootram : RAMB16BWER
+	RxRAM : RAMB16BWER
 	generic map (
 		DATA_WIDTH_A => 9,
 		DATA_WIDTH_B => 9,

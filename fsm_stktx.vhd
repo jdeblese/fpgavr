@@ -189,7 +189,7 @@ begin
 	end process;
 
 
-	bootram : RAMB16BWER
+	TxRAM : RAMB16BWER
 	generic map (
 		DATA_WIDTH_A => 9,
 		DATA_WIDTH_B => 9,
