@@ -6,6 +6,13 @@ use IEEE.STD_LOGIC_UNSIGNED.ALL;
 library UNISIM;
 use UNISIM.VComponents.all;
 
+use work.synchronizer_pkg.all;
+use work.uartrx_pkg.all;
+use work.readfsm_pkg.all;
+use work.dispatch_pkg.all;
+use work.fsm_stktx_pkg.all;
+use work.uarttx_pkg.all;
+
 entity main is
 	Port (
 		RxD : IN STD_LOGIC;
@@ -18,103 +25,35 @@ entity main is
 end main;
 
 architecture Behavioral of main is
-	component uartrx
-		Port (
-			rx     : in std_logic;
-			strobe : out std_logic;
-			data   : out std_logic_vector(7 downto 0);
-			ferror : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
+	-- uartrx
 	signal urdata : std_logic_vector(7 downto 0);
 	signal urstrobe : std_logic;
 
-	component readfsm is
-		Port (
-			uart_strobe : in std_logic;
-			uart_data : in std_logic_vector(7 downto 0);
-			ringaddr : in std_logic_vector(10 downto 0);
-			ringdata : out std_logic_vector(7 downto 0);
-			cmdstrobe : out std_logic;
-			readerr : out std_logic;
-			tokenerr : out std_logic;
-			clk      : in STD_LOGIC;
-			rst      : in STD_LOGIC);
-	end component;
-
+	-- readfsm
 	signal rdaddr : std_logic_vector(10 downto 0);
 	signal rddata : std_logic_vector(7 downto 0);
 	signal rdstrobe : std_logic;
 
-	component dispatch is
-		Port (
-			ringaddr  : out std_logic_vector(10 downto 0);
-			ringdata  : in std_logic_vector(7 downto 0);
-			cmdstrobe : in std_logic;
-			txaddr    : out std_logic_vector(10 downto 0);
-			txdata    : out std_logic_vector(7 downto 0);
-			txwr      : out std_logic;
-			txstrobe  : out std_logic;
-			txbusy    : in  std_logic;
-			MISO      : in  std_logic;
-			MOSI      : out std_logic;
-			procerr   : out std_logic;
-			busyerr   : out std_logic;
-			clk      : in STD_LOGIC;
-			rst      : in STD_LOGIC);
-	end component;
-
+	-- dispatch
 	signal dtaddr : std_logic_vector(10 downto 0);
 	signal dtdata : std_logic_vector(7 downto 0);
 	signal dtwr : std_logic;
 	signal dtstrobe : std_logic;
 	signal dtbusy : std_logic;
 
-	COMPONENT fsm_stktx
-	PORT(
-		 uart_strobe : OUT  std_logic;
-		 uart_data   : OUT  std_logic_vector(7 downto 0);
-		 uart_busy   : IN  std_logic;
-		 buffer_addr : IN  std_logic_vector(10 downto 0);
-		 buffer_data : IN  std_logic_vector(7 downto 0);
-		 buffer_wren : IN  std_logic;
-		 strobe : IN  std_logic;
-		 busy   : OUT  std_logic;
-		 clk : IN  std_logic;
-		 rst : IN  std_logic
-		);
-	END COMPONENT;
-
+	-- fsm_stktx
 	signal tudata : std_logic_vector(7 downto 0);
 	signal tustrobe : std_logic;
 	signal tubusy : std_logic;
 
-	component uarttx
-		Port (
-			tx     : out std_logic;
-			strobe : in std_logic;
-			data   : in std_logic_vector(7 downto 0);
-			busy   : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
+	-- uarttx
 	signal rxfrerror : std_logic;
 	signal readfsmerr : std_logic;
 	signal readtokenerr : std_logic;
 	signal dispatcherr : std_logic;
 	signal dispatchbusy : std_logic;
 
-	component synchronizer is
-		Port (
-			async : in std_logic;
-			sync  : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
+	-- synchronizers
 	signal syncrx, syncmiso : std_logic;
 
 begin

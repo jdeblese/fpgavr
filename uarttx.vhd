@@ -25,6 +25,22 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+
+package uarttx_pkg is
+	component uarttx
+		Port (
+			tx     : out std_logic;
+			strobe : in std_logic;
+			data   : in std_logic_vector(7 downto 0);
+			busy   : out std_logic;
+			clk    : in STD_LOGIC;
+			rst    : in STD_LOGIC);
+	end component;
+end uarttx_pkg;
+
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 -- Uncomment the following library declaration if using
@@ -35,6 +51,8 @@ use IEEE.STD_LOGIC_UNSIGNED.ALL;
 -- any Xilinx primitives in this code.
 --library UNISIM;
 --use UNISIM.VComponents.all;
+
+use work.uarttx_pkg.all;
 
 entity uarttx is
 	Port (

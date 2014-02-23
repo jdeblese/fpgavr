@@ -25,7 +25,21 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+
+package synchronizer_pkg is
+	component synchronizer
+		Port (
+			async : in std_logic;
+			sync  : out std_logic;
+			clk    : in STD_LOGIC;
+			rst    : in STD_LOGIC);
+	end component;
+end synchronizer_pkg;
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.synchronizer_pkg.all;
 
 entity synchronizer is
 	Port (

@@ -25,13 +25,33 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+
+package fsm_stktx_pkg is
+	component fsm_stktx
+		Port (
+			uart_strobe : out std_logic;
+			uart_data   : out std_logic_vector(7 downto 0);
+			uart_busy   : in  std_logic;
+			buffer_addr   : in  std_logic_vector(10 downto 0);
+			buffer_data   : in  std_logic_vector(7 downto 0);
+			buffer_wren	  : in  std_logic;
+			strobe : in  std_logic;
+			busy   : out std_logic;
+			clk : in  STD_LOGIC;
+			rst : in  STD_LOGIC);
+	end component;
+end fsm_stktx_pkg;
+
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
 
-library work;
 use work.stk500def.all;
+use work.fsm_stktx_pkg.all;
 
 entity fsm_stktx is
 	Port (

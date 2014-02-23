@@ -25,10 +25,31 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+
+package readfsm_pkg is
+	component readfsm
+		Port (
+			uart_strobe : in std_logic;
+			uart_data : in std_logic_vector(7 downto 0);
+			ringaddr : in std_logic_vector(10 downto 0);
+			ringdata : out std_logic_vector(7 downto 0);
+			cmdstrobe : out std_logic;
+			readerr : out std_logic;
+			tokenerr : out std_logic;
+			clk      : in STD_LOGIC;
+			rst      : in STD_LOGIC);
+	end component;
+end readfsm_pkg;
+
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
+
+use work.readfsm_pkg.all;
 
 entity readfsm is
 	Port (

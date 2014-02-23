@@ -25,14 +25,38 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+
+package dispatch_pkg is
+	component dispatch
+		Port (
+			ringaddr  : out std_logic_vector(10 downto 0);
+			ringdata  : in std_logic_vector(7 downto 0);
+			cmdstrobe : in std_logic;
+			txaddr    : out std_logic_vector(10 downto 0);
+			txdata    : out std_logic_vector(7 downto 0);
+			txwr      : out std_logic;
+			txstrobe  : out std_logic;
+			txbusy    : in  std_logic;
+			MISO      : in  std_logic;
+			MOSI      : out std_logic;
+			procerr   : out std_logic;
+			busyerr   : out std_logic;
+			clk      : in STD_LOGIC;
+			rst      : in STD_LOGIC);
+	end component;
+end dispatch_pkg;
+
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_UNSIGNED."+";
 use ieee.numeric_std.all;
 
 library UNISIM;
 use UNISIM.VComponents.all;
 
-library work;
 use work.stk500def.all;
+use work.dispatch_pkg.all;
 
 entity dispatch is
 	Port (
