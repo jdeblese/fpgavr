@@ -1,0 +1,15 @@
+fpgavr
+======
+
+See: Atmel Application Note AVR068 - STK500 Communication Protocol
+
+Atmel AVR programmers can use a standardized, open protocol for communication
+between the programmer software and the hardware device. Many software programmers,
+including *avrdude*, support the STK500 protocol. Therefore, building a new
+hardware programmer with support for STK500 ensures it will be broadly
+compatible with existing software.
+
+Principle
+---------
+
+A series of FSMs will be used to implement the STK500 protocol in an FPGA.
