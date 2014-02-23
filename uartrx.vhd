@@ -41,16 +41,7 @@ end uartrx_pkg;
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_UNSIGNED."+";
-
--- Uncomment the following library declaration if using
--- arithmetic functions with Signed or Unsigned values
 use IEEE.NUMERIC_STD.ALL;
-
--- Uncomment the following library declaration if instantiating
--- any Xilinx primitives in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
 
 use work.uartrx_pkg.all;
 
@@ -70,10 +61,10 @@ architecture Behavioral of uartrx is
 	signal divstrobe : std_logic;
 	signal div_en    : std_logic;
 
-	signal bitcount : std_logic_vector(3 downto 0);
+	signal bitcount : unsigned(3 downto 0);
 	signal shifter  : std_logic_vector(8 downto 0);
 
-	signal count16 : std_logic_vector(3 downto 0);
+	signal count16 : unsigned(3 downto 0);
 	signal strobe16 : std_logic;
 
 begin
