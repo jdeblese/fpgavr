@@ -31,113 +31,64 @@ USE ieee.std_logic_1164.ALL;
 -- Uncomment the following library declaration if using
 -- arithmetic functions with Signed or Unsigned values
 --USE ieee.numeric_std.ALL;
+
+use work.synchronizer_pkg.all;
+use work.uartrx_pkg.all;
+use work.readfsm_pkg.all;
+--use work.dispatch_pkg.all;
+use work.fsm_stktx_pkg.all;
+use work.uarttx_pkg.all;
  
 ENTITY main_tb IS
 END main_tb;
  
 ARCHITECTURE behavior OF main_tb IS 
 
-	component uartrx
-		Port (
-			rx     : in std_logic;
-			strobe : out std_logic;
-			data   : out std_logic_vector(7 downto 0);
-			ferror : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
+	-- uartrx
 	signal urdata : std_logic_vector(7 downto 0);
 	signal urstrobe : std_logic;
 
-	component readfsm is
-		Port (
-			uart_strobe : in std_logic;
-			uart_data : in std_logic_vector(7 downto 0);
-			ringaddr : in std_logic_vector(10 downto 0);
-			ringdata : out std_logic_vector(7 downto 0);
-			cmdstrobe : out std_logic;
-			readerr : out std_logic;
-			clk      : in STD_LOGIC;
-			rst      : in STD_LOGIC);
-	end component;
-
+	-- readfsm
 	signal rdaddr : std_logic_vector(10 downto 0);
 	signal rddata : std_logic_vector(7 downto 0);
 	signal rdstrobe : std_logic;
 
-	component dispatch is
-		Port (
-			ringaddr  : out std_logic_vector(10 downto 0);
-			ringdata  : in std_logic_vector(7 downto 0);
-			cmdstrobe : in std_logic;
-			txaddr    : out std_logic_vector(10 downto 0);
-			txdata    : out std_logic_vector(7 downto 0);
-			txwr      : out std_logic;
-			txstrobe  : out std_logic;
-			txbusy    : in  std_logic;
-			procerr   : out std_logic;
-			busyerr   : out std_logic;
-			clk      : in STD_LOGIC;
-			rst      : in STD_LOGIC);
-	end component;
-
+	-- dispatch
 	signal dtaddr : std_logic_vector(10 downto 0);
 	signal dtdata : std_logic_vector(7 downto 0);
 	signal dtwr : std_logic;
 	signal dtstrobe : std_logic;
 	signal dtbusy : std_logic;
 
-	COMPONENT fsm_stktx
-	PORT(
-		 uart_strobe : OUT  std_logic;
-		 uart_data   : OUT  std_logic_vector(7 downto 0);
-		 uart_busy   : IN  std_logic;
-		 buffer_addr : IN  std_logic_vector(10 downto 0);
-		 buffer_data : IN  std_logic_vector(7 downto 0);
-		 buffer_wren : IN  std_logic;
-		 strobe : IN  std_logic;
-		 busy   : OUT  std_logic;
-		 clk : IN  std_logic;
-		 rst : IN  std_logic
-		);
-	END COMPONENT;
-
+	-- fsm_stktx
 	signal tudata : std_logic_vector(7 downto 0);
 	signal tustrobe : std_logic;
 	signal tubusy : std_logic;
 
-	component uarttx
-		Port (
-			tx     : out std_logic;
-			strobe : in std_logic;
-			data   : in std_logic_vector(7 downto 0);
-			busy   : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
-
+	-- uarttx
 	signal rxfrerror : std_logic;
 	signal readfsmerr : std_logic;
+	signal readtokenerr : std_logic;
 	signal dispatcherr : std_logic;
 	signal dispatchbusy : std_logic;
 
+	-- other
 	signal RxD : std_logic := '1';
 	signal TxD : std_logic;
  
-   signal clk : std_logic := '0';
-   signal rst : std_logic := '1';
+	signal clk : std_logic := '0';
+	signal rst : std_logic := '1';
 
-   -- Clock period definitions
-   constant clk_period : time := 10 ns;
+	-- Clock period definitions
+	constant clk_period : time := 10 ns;
 
-   constant baud_period : time := 8.681 us;
+	constant baud_period : time := 8.681 us;
  
 BEGIN
  
 	u1 : uartrx port map (RxD, urstrobe, urdata, rxfrerror, CLK, RST);
-	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, CLK, RST);
-	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, dispatchbusy, CLK, RST);
+	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, readtokenerr, CLK, RST);
+--	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, dispatcherr, dispatchbusy, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);
 
@@ -160,7 +111,7 @@ BEGIN
 
       wait for clk_period*10;
 
-	  RxD <= '0';  -- Transmit x1B
+	  RxD <= '0';  -- Transmit x1B, message start
 	  wait for baud_period;
 	  RxD <= '1';
 	  wait for baud_period;
@@ -181,7 +132,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit xFF (seq)
+	  RxD <= '0';  -- Transmit xFF, sequence number
 	  wait for baud_period;
 	  RxD <= '1';
 	  wait for baud_period;
@@ -202,7 +153,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit x00
+	  RxD <= '0';  -- Transmit x00, message size msB
 	  wait for baud_period;
 	  RxD <= '0';
 	  wait for baud_period;
@@ -223,7 +174,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit x01
+	  RxD <= '0';  -- Transmit x01, message size lsB
 	  wait for baud_period;
 	  RxD <= '1';
 	  wait for baud_period;
@@ -244,7 +195,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit x0e
+	  RxD <= '0';  -- Transmit x0e, token
 	  wait for baud_period;
 	  RxD <= '0';
 	  wait for baud_period;
@@ -265,7 +216,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit x01
+	  RxD <= '0';  -- Transmit x01, message body
 	  wait for baud_period;
 	  RxD <= '1';
 	  wait for baud_period;
@@ -286,7 +237,7 @@ BEGIN
 	  RxD <= '1'; -- Stop bit
 	  wait for baud_period;
 
-	  RxD <= '0';  -- Transmit x15
+	  RxD <= '0';  -- Transmit xEA, checksum
 	  wait for baud_period;
 	  RxD <= '0';
 	  wait for baud_period;
