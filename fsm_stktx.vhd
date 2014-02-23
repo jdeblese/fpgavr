@@ -45,7 +45,7 @@ end fsm_stktx_pkg;
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.numeric_std.all;
 
 library UNISIM;
 use UNISIM.VComponents.all;
@@ -73,7 +73,7 @@ architecture Behavioral of fsm_stktx is
 	signal ADDRB : std_logic_vector(13 downto 0);
 	signal DATAB : std_logic_vector(31 downto 0);
 
-	signal readaddr : std_logic_vector(10 downto 0);
+	signal readaddr, readaddr_new : unsigned(10 downto 0);
 	signal readdata : std_logic_vector(7 downto 0);
 
 	signal data : std_logic_vector(7 downto 0);
@@ -81,13 +81,21 @@ architecture Behavioral of fsm_stktx is
 	signal datalen : std_logic_vector(15 downto 0);
 	signal databyte : std_logic_vector(16 downto 0);
 
-	signal cksum : std_logic_vector(7 downto 0);
+	signal cksum, cksum_new : std_logic_vector(7 downto 0);
 	signal cksum_en : std_logic;
 
 	signal active : std_logic;
 
 	signal tick : std_logic_vector(1 downto 0);
 
+	type state_type is (st_idle, st_strobe, st_waitforbusy, st_waitforidle);
+	signal state, state_new : state_type;
+	signal uart_data_new : std_logic_vector(7 downto 0);
+	signal busy_next, uart_strobe_new : std_logic;
+
+	-- 17 bits, due to header
+	signal txcount, txcount_new : unsigned(16 downto 0);
+	signal txlen, txlen_new : unsigned(16 downto 0);
 begin
 
 	-- Algorith
@@ -97,117 +105,114 @@ begin
 	--   the packet lenth and data as needed
 	-- Busy is asserted during a transmit
 
-	busy <= active;
-	uart_data <= data;
-
-	calcsum : process(rst, clk)
-		variable old : std_logic_vector(1 downto 0);
+	syn_proc : process(rst, clk)
 	begin
 		if rst = '1' then
+			state <= st_idle;
+			readaddr <= (others => '0');
+
+			txcount <= (others => '0');
+			txlen <= (others => '0');
 			cksum <= (others => '0');
-		elsif rising_edge(clk) then
-			if active = '0' then
-				cksum <= (others => '0');
-			elsif old = "01" and tick = "10" and datamux /= "11" then
-				cksum <= data xor cksum;
-			end if;
-			old := tick;
-		end if;
-	end process;
 
-	-- UART data mux
-	with datamux select
-		data <= MESSAGE_START when "00",
-		        TOKEN         when "01",
-		        readdata      when "10",
-		        cksum         when others;
-
-	-- Data mux driver
-	process(databyte,datalen)
-	begin
-		if databyte = "0" & X"0000" then
-			datamux <= "00";  -- message start
-			readaddr <= (others => '0');
-		elsif databyte = "0" & X"0001" then
-			datamux <= "10";  -- sequence number
-			readaddr <= "000" & X"00";
-		elsif databyte = "0" & X"0002" then
-			datamux <= "10";  -- message size msb
-			readaddr <= "000" & X"01";
-		elsif databyte = "0" & X"0003" then
-			datamux <= "10";  -- message size lsb
-			readaddr <= "000" & X"02";
-		elsif databyte = "0" & X"0004" then
-			datamux <= "01";  -- token
-			readaddr <= (others => '0');
-		elsif databyte = X"5" + datalen then
-			datamux <= "11";  -- checksum
-			readaddr <= (others => '0');
-		else
-			datamux <= "10";  -- message body
-			readaddr <= ("111" & X"FE") + databyte(10 downto 0);
-		end if;
-	end process;
-
-	-- Wait for strobe
-	-- Zero the byte counter
-	-- Loop
-	--   Set the data source
-	--   Stobe the transmitter
-	--   Wait for busy to end
-	--   Increment the byte counter
-
-	process(rst,clk)
-	begin
-		if rst = '1' then
-			datalen <= (others => '0');
-		elsif rising_edge(clk) then
-			if tick = "10" and databyte = "0" & X"0002" then
-				datalen(15 downto 8) <= readdata;
-			elsif tick = "10" and databyte = "0" & X"0003" then
-				datalen(7 downto 0) <= readdata;
-			end if;
-		end if;
-	end process;
-
-	process(rst,clk)
-	begin
-		if rst = '1' then
-			databyte <= (others => '0');
-			active <= '0';
-			uart_strobe <= '0';
-			tick <= "00";
-		elsif falling_edge(clk) then
+			uart_data <= (others => '0');
 			uart_strobe <= '0';
 
-			if active = '0' and strobe = '1' then
-				active <= '1';
-				databyte <= (others => '1');
-				tick <= "00";
-			elsif active = '1' then
-				if tick = "00" then  -- Increment the byte counter, setting the output data
-					if databyte = X"5" + datalen then
-						active <= '0';
+			busy <= '0';
+		elsif rising_edge(clk) then
+			state <= state_new;
+			readaddr <= readaddr_new;
+
+			txcount <= txcount_new;
+			txlen <= txlen_new;
+			cksum <= cksum_new;
+
+			uart_data <= uart_data_new;
+			uart_strobe <= uart_strobe_new;
+
+			busy <= busy_next;
+		end if;
+	end process;
+
+	com_proc : process(state, readaddr, readdata, txcount, txlen, cksum, strobe, uart_busy)
+		variable state_next : state_type;
+		variable readaddr_next : unsigned(10 downto 0);
+		variable txcount_next, txlen_next : unsigned(16 downto 0);
+		variable cksum_next : std_logic_vector(7 downto 0);
+	begin
+		-- Signals that maintain state
+		state_next := state;
+		readaddr_next := readaddr;
+		txcount_next := txcount;
+		txlen_next := txlen;
+		cksum_next := cksum;
+
+		-- Signals that don't maintain state
+		uart_data_new <= (others => '0');
+		uart_strobe_new <= '0';
+		busy_next <= '1';
+
+		case state is
+			when st_idle =>
+				busy_next <= '0';
+				readaddr_next := (others => '0');
+				txcount_next := (others => '0');
+				txlen_next := '0' & x"0005";
+				cksum_next := (others => '0');
+
+				if strobe = '1' then
+					-- Raise busy flag as soon as possible
+					busy_next <= '1';
+					state_next := st_strobe;
+				end if;
+
+			when st_strobe =>
+				cksum_next := cksum xor readdata;
+				uart_data_new <= readdata;
+				uart_strobe_new <= '1';
+				readaddr_next := readaddr + "1";
+				txcount_next := txcount + "1";
+
+				if txcount = x"2" then
+					txlen_next(15 downto 8) := unsigned(readdata);
+				elsif txcount = x"3" then
+					txlen_next(7 downto 0) := unsigned(readdata);
+				elsif txcount = x"4" then
+					txlen_next := txlen_next + x"5";
+				end if;
+
+				state_next := st_waitforbusy;
+
+			when st_waitforbusy =>
+				if uart_busy = '1' then
+					state_next := st_waitforidle;
+				end if;
+
+			when st_waitforidle =>
+				uart_data_new <= cksum;
+				if uart_busy = '0' then
+					if txcount > txlen then
+						state_next := st_idle;
+					elsif txcount = txlen then
+						-- Append the checksum
+						uart_strobe_new <= '1';
+						txcount_next := txcount + "1";
+						state_next := st_waitforbusy;
 					else
-						databyte <= databyte + "1";
-						tick <= "01";
-					end if;
-				elsif tick = "01" then  -- Strobe the UART
-					uart_strobe <= '1';
-					tick <= "10";
-				elsif tick = "10" then  -- Wait for the UART to go busy
-					if uart_busy = '1' then
-						tick <= "11";
-					end if;
-				elsif tick = "11" then  -- Wait for the UART to finish
-					if uart_busy = '0' then
-						tick <= "00";
+						state_next := st_strobe;
 					end if;
 				end if;
-			end if;
-		end if;
-	end process;
 
+			when others =>
+				state_next := st_idle;
+		end case;
+
+		state_new <= state_next;
+		readaddr_new <= readaddr_next;
+		txcount_new <= txcount_next;
+		txlen_new <= txlen_next;
+		cksum_new <= cksum_next;
+	end process;
 
 	TxRAM : RAMB16BWER
 	generic map (
@@ -247,7 +252,7 @@ begin
 		RSTB => '0'         -- 1-bit input: register set/reset input
 	);
 
-	ADDRA <= readaddr & "000";
+	ADDRA <= std_logic_vector(readaddr) & "000";
 	readdata <= DATAA(7 downto 0);
 
 	ADDRB <= buffer_addr & "000";
