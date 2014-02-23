@@ -44,7 +44,7 @@ end readfsm_pkg;
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
@@ -65,10 +65,10 @@ entity readfsm is
 end readfsm;
 
 architecture Behavioral of readfsm is
-	signal rxlen : std_logic_vector(15 downto 0);
+	signal rxlen, rxlen_new : unsigned(15 downto 0);
 
-	signal ringptr, ringptr_new : std_logic_vector(10 downto 0);
-	signal oldptr  : std_logic_vector(10 downto 0);
+	signal ringptr, ringptr_new : unsigned(10 downto 0);
+	signal oldptr, oldptr_new  : unsigned(10 downto 0);
 	signal ring_wr : std_logic;
 
 	signal ADDRA : std_logic_vector(13 downto 0);
@@ -76,12 +76,15 @@ architecture Behavioral of readfsm is
 	signal ADDRB : std_logic_vector(13 downto 0);
 	signal DATAB : std_logic_vector(31 downto 0);
 
-	type state_type is (st_start0, st_start1, st_seq,
-		st_szhi0, st_szhi1, st_szlo0, st_szlo1, st_token0, st_token1,
-		st_rcv0, st_rcv1, st_cksum0, st_cksum1, st_tokenerr, st_ckerr, st_incptr, st_ringwr);
+	type state_type is (st_start, st_seq, st_szhi, st_szlo, st_token, st_rcv, st_cksum,
+	                    st_tokenerr, st_ckerr);
 	signal state, next_state, return_state, return_state_new : state_type;
 
 	signal cksum, cksum_new : std_logic_vector(7 downto 0);
+
+	-- cmdstrobe could be output directly from the combinatorial logic. This strobe is
+	-- driven by the state of the rxstrobe, however, so doing so could lead to a very long
+	-- critical path. The strobe is therefore pipelined.
 	signal cmdstrobe_int, cmdstrobe_new : std_logic;
 
 begin
@@ -92,33 +95,37 @@ begin
 	process(rst,clk)
 	begin
 		if rst = '1' then
+			-- IO
 			cmdstrobe_int <= '0';
+			-- Memory
 			cksum <= (others => '0');
 			ringptr <= (others => '0');
+			oldptr <= (others => '0');
+			rxlen <= (others => '0');
+			-- FSM
+			state <= st_start;
+			return_state <= st_start;
 		elsif rising_edge(clk) then
+			-- IO
 			cmdstrobe_int <= cmdstrobe_new;
+			-- Memory
 			cksum <= cksum_new;
 			ringptr <= ringptr_new;
-		end if;
-	end process;
-
-	-- FSM changes state on the falling edge
-	sync_proc : process(rst,clk)
-	begin
-		if rst = '1' then
-			state <= st_start0;
-			return_state <= st_start0;
-		elsif falling_edge(clk) then
+			oldptr <= oldptr_new;
+			rxlen <= rxlen_new;
+			-- FSM
 			state <= next_state;
 			return_state <= return_state_new;
 		end if;
 	end process;
 
 	-- Combinatorial logic
-	comb_proc : process(state,uart_strobe,uart_data,rxlen,cksum,ringptr,oldptr,return_state)
-		variable ringptr_next : std_logic_vector(10 downto 0);
+	comb_proc : process(state,uart_strobe,uart_data,rxlen,cksum,ringptr,oldptr,return_state,rxlen)
+		variable ringptr_next : unsigned(10 downto 0);
+		variable oldptr_next : unsigned(10 downto 0);
 		variable cksum_next : std_logic_vector(7 downto 0);
 		variable cmdstrobe_next : std_logic;
+		variable rxlen_next : unsigned(15 downto 0);
 	begin
 
 		next_state <= state;
@@ -128,59 +135,64 @@ begin
 		tokenerr <= '0';
 
 
+		rxlen_next := rxlen;
 		ringptr_next := ringptr;
+		oldptr_next := oldptr;
 		cmdstrobe_next := '0';
 		cksum_next := cksum;
 
 		case state is
-			when st_start0 =>  -- Wait for a start byte
+			when st_start =>  -- Wait for a start byte
+				oldptr_next := ringptr;
 				if uart_strobe = '1' and uart_data = X"1B" then
-					next_state <= st_start1;
+					cksum_next := uart_data;
+					next_state <= st_seq;
 				end if;
-
-			when st_start1 =>
-				cksum_next := uart_data;
-				next_state <= st_seq;
 
 			when st_seq =>  -- Save the sequence number. Check vs local counter?
 				if uart_strobe = '1' then
-					return_state_new <= st_szhi0;
-					next_state <= st_ringwr;
+					cksum_next := uart_data xor cksum;
+
+					-- Data written and pointer incremented on next rising edge
+					ring_wr <= '1';
+					ringptr_next := ringptr + "1";
+
+					next_state <= st_szhi;
 				end if;
 
-			when st_szhi0 =>  -- Read high byte of length
+			when st_szhi =>  -- Read high byte of length
 				if uart_strobe = '1' then
-					next_state <= st_szhi1;
+					cksum_next := uart_data xor cksum;
+					rxlen_next(15 downto 8) := unsigned(uart_data);
+
+					-- Data written and pointer incremented on next rising edge
+					ring_wr <= '1';
+					ringptr_next := ringptr + "1";
+
+					next_state <= st_szlo;
 				end if;
 
-			when st_szhi1 =>
-				cksum_next := uart_data xor cksum;
-				ring_wr <= '1';
-				return_state_new <= st_szlo0;
-				next_state <= st_incptr;
-
-			when st_szlo0 =>  -- Read low byte of length
+			when st_szlo =>  -- Read low byte of length
 				if uart_strobe = '1' then
-					next_state <= st_szlo1;
+					cksum_next := uart_data xor cksum;
+					rxlen_next(7 downto 0) := unsigned(uart_data);
+
+					-- Data written and pointer incremented on next rising edge
+					ring_wr <= '1';
+					ringptr_next := ringptr + "1";
+
+					next_state <= st_token;
 				end if;
 
-			when st_szlo1 =>
-				cksum_next := uart_data xor cksum;
-				ring_wr <= '1';
-				return_state_new <= st_token0;
-				next_state <= st_incptr;
-
-			when st_token0 =>  -- Check the token, jump to error if incorrect
+			when st_token =>  -- Check the token, jump to error if incorrect
 				if uart_strobe = '1' then
-					next_state <= st_token1;
-				end if;
-
-			when st_token1 =>
-				cksum_next := uart_data xor cksum;
-				if uart_data = X"0E" then
-					next_state <= st_rcv0;
-				else
-					next_state <= st_tokenerr;
+					cksum_next := uart_data xor cksum;
+					-- Verify the token
+					if uart_data = X"0E" then
+						next_state <= st_rcv;
+					else
+						next_state <= st_tokenerr;
+					end if;
 				end if;
 
 			when st_tokenerr =>
@@ -188,85 +200,49 @@ begin
 				next_state <= st_tokenerr;
 
 
-			when st_rcv0 =>
+			when st_rcv =>  -- Save data as long as length > 0
 				if uart_strobe = '1' then
-					next_state <= st_rcv1;
+					cksum_next := uart_data xor cksum;
+
+					-- Data written and pointer incremented on next rising edge
+					ring_wr <= '1';
+					ringptr_next := ringptr + "1";
+
+					rxlen_next := rxlen - "1";
+
+					-- Check against rxlen to shorten the critical path
+					if rxlen = "1" then
+						next_state <= st_cksum;
+					else
+						next_state <= st_rcv;
+					end if;
 				end if;
 
-			when st_rcv1 =>  -- Save data as long as length > 0
-				cksum_next := uart_data xor cksum;
-				ring_wr <= '1';
-				if rxlen = "0" then
-					return_state_new <= st_cksum0;
-				else
-					return_state_new <= st_rcv0;
-				end if;
-				next_state <= st_incptr;
-
-			when st_cksum0 =>  -- Compare checksums, jump to error if they don't match
+			when st_cksum =>  -- Compare checksums, jump to error if they don't match
 				if uart_strobe = '1' then
 					if uart_data = cksum then
-						next_state <= st_cksum1;
+						cmdstrobe_next := '1';
+						next_state <= st_start;
 					else
 						next_state <= st_ckerr;
 					end if;
 				end if;
-
-			when st_cksum1 =>
-				cmdstrobe_next := '1';
-				next_state <= st_start0;
 
 			when st_ckerr =>  -- Rewind the ring buffer pointer
 				readerr <= '1';
 				ringptr_next := oldptr;
 				next_state <= st_ckerr;
 
-			when st_ringwr =>
-				cksum_next := uart_data xor cksum;
-				ring_wr <= '1';
-				next_state <= st_incptr;
-
-			when st_incptr =>
-				ringptr_next := ringptr + "1";
-				next_state <= return_state;
-
 			when others =>
 				next_state <= state;
 		end case;
 
 		-- Latch the new values
+		rxlen_new <= rxlen_next;
 		ringptr_new <= ringptr_next;
+		oldptr_new <= oldptr_next;
 		cksum_new <= cksum_next;
 		cmdstrobe_new <= cmdstrobe_next;
-	end process;
-
-	-- Store the value of the ring buffer pointer when starting a new receive cycle
-	ptr_old : process(rst, clk)
-	begin
-		if rst = '1' then
-			oldptr <= (others => '0');
-		elsif rising_edge(clk) then
-			if state = st_start1 then
-				oldptr <= ringptr;
-			end if;
-		end if;
-	end process;
-
-	savelen : process(rst,clk)
-	begin
-		if rst = '1' then
-			rxlen <= (others => '0');
-		elsif rising_edge(clk) then
-			if uart_strobe = '1' then
-				if state = st_szhi1 then
-					rxlen(15 downto 8) <= uart_data;
-				elsif state = st_szlo1 then
-					rxlen(7 downto 0) <= uart_data;
-				elsif state = st_rcv1 then
-					rxlen <= rxlen - "1";
-				end if;
-			end if;
-		end if;
 	end process;
 
 	RxRAM : RAMB16BWER
@@ -308,7 +284,7 @@ begin
 	);
 
 	ADDRA <= ringaddr & "000";
-	ADDRB <= ringptr & "000";
+	ADDRB <= std_logic_vector(ringptr) & "000";
 	DATAB <= X"000000" & uart_data;
 	ringdata <= DATAA(7 downto 0);
 
