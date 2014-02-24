@@ -177,7 +177,6 @@ begin
 					txlen_next(15 downto 8) := unsigned(readdata);
 				elsif txcount = x"3" then
 					txlen_next(7 downto 0) := unsigned(readdata);
-				elsif txcount = x"4" then
 					txlen_next := txlen_next + x"5";
 				end if;
 
