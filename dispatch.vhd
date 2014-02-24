@@ -271,6 +271,8 @@ begin
 	-- Builds an STK500 reply message in the local ring buffer based
 	-- on the received message and on the reaction from the device
 
+	ringaddr <= std_logic_vector(ringptr);
+
 	sync_proc : process(rst,clk)
 	begin
 		if rst = '1' then
@@ -395,7 +397,7 @@ begin
 				msgbodylen_next := msgbodylen + "1";
 
 --				hdrptr := ringptr;
-				ringptr_next := ringptr + "1";  -- On exit from this state, ringptr points after cmd
+--				ringptr_next := ringptr + "1";  -- On exit from this state, ringptr points after cmd
 
 				case ringdata is
 					when CMD_SIGN_ON => state_new <= st_signon1;
@@ -451,7 +453,7 @@ begin
 				if txbusy = '1' then
 					state_new <= st_fin4;
 				else
---					ringptr <= hdrptr + inlen(10 downto 0);
+--					ringptr_next := hdrptr + inlen(10 downto 0);
 					state_new <= st_start;
 				end if;
 
@@ -522,7 +524,7 @@ begin
 
 			when st_getparam2 =>
 				-- ringptr will now points to the start of the next packet
-				ringptr <= ringptr + "1";
+				ringptr_next := ringptr + "1";
 				-- Write parameter to x0005
 				txaddr <= "000" & X"07";
 				txwr <= '1';
@@ -551,7 +553,7 @@ begin
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
-				ringptr <= ringptr + "1";
+				ringptr_next := ringptr + "1";
 				target_next := ringdata;
 
 				if ringdata = PARAM_RESET_POLARITY
@@ -565,7 +567,7 @@ begin
 				end if;
 
 			when st_setparam2 =>
-				ringptr <= ringptr + "1";
+				ringptr_next := ringptr + "1";
 
 				if target = PARAM_RESET_POLARITY then
 					if ringdata = X"00" then
@@ -583,7 +585,7 @@ begin
 --			-- CMD_ENTER_PROGMODE_ISP
 --			when st_ispinit1 =>
 --				isp_regs(isp_idx) <= ringdata;
---				ringptr <= ringptr + "1";
+--				ringptr_next := ringptr + "1";
 --				if isp_idx = isp_nregs-1 then
 --					state_new <= st_ispinit2;
 --				else
@@ -612,7 +614,7 @@ begin
 --			when st_ispreadsig1 =>
 --				-- Save RetAddr in tmp and advance Rx ring pointer
 --				tmp <= ringdata;
---				ringptr <= ringptr + "1";
+--				ringptr_next := ringptr + "1";
 
 --				-- 4 bytes to transmit over ISP interface
 --				ispbytecount <= X"03";
@@ -629,7 +631,7 @@ begin
 --				-- Save sequence of 4 commands into ISP ring buffer
 --				ispring_idata <= ringdata;
 --				ispring_wr <= '1';
---				ringptr <= ringptr + "1";
+--				ringptr_next := ringptr + "1";
 
 --				if ispbytecount = X"00" then
 --					-- Save second status byte in response
