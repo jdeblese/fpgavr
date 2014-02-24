@@ -103,6 +103,7 @@ architecture Behavioral of dispatch is
 	-- Received packet signals
 	-- ***********************
 	signal ringptr, ringptr_new : unsigned(10 downto 0);
+	signal packetptr, packetptr_new : unsigned(10 downto 0);
 	signal packetlen, packetlen_new : unsigned(15 downto 0);
 
 	-- *********************
@@ -281,6 +282,7 @@ begin
 			msgbodylen <= (others => '0');
 			ringptr <= (others => '0');
 			packetlen <= (others => '0');
+			packetptr <= (others => '0');
 			strlen <= (others => '0');
 			txstrobe <= '0';
 
@@ -295,6 +297,7 @@ begin
 			msgbodylen <= msgbodylen_new;
 			ringptr <= ringptr_new;
 			packetlen <= packetlen_new;
+			packetptr <= packetptr_new;
 			strlen <= strlen_new;
 			txstrobe <= txstrobe_new;
 			target <= target_new;
@@ -305,9 +308,10 @@ begin
 	end process;
 
 
-	comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration)
+	comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
+		variable packetptr_next : unsigned(10 downto 0);
 		variable packetlen_next : unsigned(15 downto 0);
 		variable strlen_next : unsigned(3 downto 0);
 		variable target_next : std_logic_vector(7 downto 0);
@@ -315,12 +319,12 @@ begin
 		variable stk_rst_polarity_next : std_logic;
 		variable stk_init_next : std_logic_vector(7 downto 0);
 		variable txstrobe_next : std_logic;
---		variable hdrptr : std_logic_vector(10 downto 0);
 	begin
 		-- Pipelined signals
 		msgbodylen_next := msgbodylen;
 		ringptr_next := ringptr;
 		packetlen_next := packetlen;
+		packetptr_next := packetptr;
 		strlen_next := strlen;
 
 		target_next := target;
@@ -388,6 +392,7 @@ begin
 				txdata <= TOKEN;
 				txwr <= '1';
 
+				packetptr_next := ringptr;
 
 			when st_storecmd =>
 				-- Answer ID is usually identical to the received command ID
@@ -396,7 +401,6 @@ begin
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
---				hdrptr := ringptr;
 --				ringptr_next := ringptr + "1";  -- On exit from this state, ringptr points after cmd
 
 				case ringdata is
@@ -453,7 +457,8 @@ begin
 				if txbusy = '1' then
 					state_new <= st_fin4;
 				else
---					ringptr_next := hdrptr + inlen(10 downto 0);
+					-- Ensure that the pointer is in the right place, regardless
+					ringptr_next := packetptr + packetlen(10 downto 0);
 					state_new <= st_start;
 				end if;
 
@@ -515,6 +520,7 @@ begin
 				   or ringdata = PARAM_TOPCARD_DETECT
 				   or ringdata = PARAM_DATA
 				   or ringdata = PARAM_RESET_POLARITY then
+					-- No need to advance ringpointer, as fin4 will do clean-up
 					txdata <= STATUS_CMD_FAILED;
 					state_new <= st_fin1;
 				else
@@ -670,6 +676,7 @@ begin
 		msgbodylen_new <= msgbodylen_next;
 		ringptr_new <= ringptr_next;
 		packetlen_new <= packetlen_next;
+		packetptr_new <= packetptr_next;
 		strlen_new <= strlen_next;
 		txstrobe_new <= txstrobe_next;
 
