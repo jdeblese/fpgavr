@@ -139,8 +139,8 @@ architecture Behavioral of dispatch is
 	constant BUILD_NUMBER : std_logic_vector(15 downto 0) := X"0001";
 	constant HW_VER       : std_logic_vector(7 downto 0) := X"01";
 	constant SW_VER       : std_logic_vector(15 downto 0) := X"0200";
-	signal stk_vtarget    : std_logic_vector(7 downto 0);  -- fixed-point 10x the voltage: 3.3V => 33
-	signal stk_vadjust    : std_logic_vector(7 downto 0);  -- fixed-point 10x the voltage: 3.3V => 33
+	constant stk_vtarget  : std_logic_vector(7 downto 0) := X"21";  -- 3.3 V
+	constant stk_vadjust  : std_logic_vector(7 downto 0) := X"21";  -- 3.3 V
 	signal stk_osc_pscale : std_logic_vector(7 downto 0);  -- AT90S8535 Timer, see data sheet
 	signal stk_osc_cmatch : std_logic_vector(7 downto 0);  -- AT90S8535 Timer, see data sheet
 	signal stk_topcard_detect : std_logic_vector(7 downto 0);
@@ -625,9 +625,7 @@ begin
 				-- Just as with setparam, need to store the parameter id
 				target_next := ringdata;
 
-				if ringdata = PARAM_VTARGET
-				   or ringdata = PARAM_VADJUST
-				   or ringdata = PARAM_OSC_PSCALE
+				if    ringdata = PARAM_OSC_PSCALE
 				   or ringdata = PARAM_OSC_CMATCH
 				   or ringdata = PARAM_TOPCARD_DETECT
 				   or ringdata = PARAM_DATA
@@ -656,6 +654,8 @@ begin
 					when PARAM_SW_MINOR => txdata <= SW_VER(7 downto 0);
 					when PARAM_SCK_DURATION => txdata <= std_logic_vector(stk_sck_duration(7 downto 0));
 					when PARAM_CONTROLLER_INIT => txdata <= stk_init(7 downto 0);
+					when PARAM_VTARGET => txdata <= stk_vtarget;
+					when PARAM_VADJUST => txdata <= stk_vadjust;
 					when others => txdata <= X"00";
 				end case;
 
