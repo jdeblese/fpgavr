@@ -622,6 +622,9 @@ begin
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
+				-- Just as with setparam, need to store the parameter id
+				target_next := ringdata;
+
 				if ringdata = PARAM_VTARGET
 				   or ringdata = PARAM_VADJUST
 				   or ringdata = PARAM_OSC_PSCALE
@@ -645,7 +648,7 @@ begin
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
-				case ringdata is
+				case target is
 					when PARAM_BUILD_NUMBER_LOW => txdata <= BUILD_NUMBER(7 downto 0);
 					when PARAM_BUILD_NUMBER_HIGH => txdata <= BUILD_NUMBER(15 downto 8);
 					when PARAM_HW_VER => txdata <= HW_VER;
