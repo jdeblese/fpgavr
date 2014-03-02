@@ -19,6 +19,7 @@ entity main is
 		TxD : OUT STD_LOGIC;
 		MISO : IN STD_LOGIC;
 		MOSI : OUT STD_LOGIC;
+		SCK : OUT STD_LOGIC;
 		RST : IN STD_LOGIC;
 		CLK : in  STD_LOGIC;
 		LED : OUT STD_LOGIC_VECTOR(7 downto 0) );
@@ -70,7 +71,7 @@ begin
 	u0 : synchronizer port map(RxD, syncrx, CLK, RST);
 	u1 : uartrx port map (syncrx, urstrobe, urdata, rxfrerror, CLK, RST);
 	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, readtokenerr, CLK, RST);
-	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, syncmiso, MOSI, dispatcherr, dispatchbusy, CLK, RST);
+	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, syncmiso, MOSI, SCK, dispatcherr, dispatchbusy, CLK, RST);
 	u7 : synchronizer port map(MISO, syncmiso, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);

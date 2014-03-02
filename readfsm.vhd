@@ -23,6 +23,8 @@
 --
 -- For more information, please refer to <http://unlicense.org/>
 
+-- TODO receive timeout, for when length is wrong
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 

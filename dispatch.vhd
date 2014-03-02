@@ -42,6 +42,7 @@ package dispatch_pkg is
 			-- Outputs to the device being programmed
 			MISO      : in  std_logic;
 			MOSI      : out std_logic;
+			SCK       : out std_logic;
 			-- Error flags
 			procerr   : out std_logic;
 			busyerr   : out std_logic;
@@ -74,6 +75,7 @@ entity dispatch is
 		txbusy    : in  std_logic;
 		MISO      : in  std_logic;
 		MOSI      : out std_logic;
+		SCK       : out std_logic;
 		procerr   : out std_logic;
 		busyerr   : out std_logic;
 		clk      : in STD_LOGIC;
@@ -93,11 +95,22 @@ architecture Behavioral of dispatch is
 	    st_signon1, st_signon2, st_signon3,
 	    st_ispinit1, st_ispinit2, st_ispfin1,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
+		st_ispmulti1, st_ispmulti2, st_ispmulti3, st_ispmultitx, st_ispmultiwait,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
 	signal state, state_new : state_type;
 
 	signal byteinc : std_logic;
 	signal target, target_new : std_logic_vector(7 downto 0);
+
+	-- registers for number of bytes to receive and to transmit
+	signal numrx, numrx_new : unsigned(7 downto 0);
+	signal numtx, numtx_new : unsigned(7 downto 0);
+	-- counter for the number of bytes transmitted
+	signal spicount, spicount_new : unsigned(8 downto 0);
+	-- data to be transmitted over the SPI link
+	signal spidata, spidata_new : std_logic_vector(7 downto 0);
+	-- strobe signal indicating data valid
+	signal spistrobe, spistrobe_new : std_logic;
 
 	-- ***********************
 	-- Received packet signals
@@ -139,114 +152,172 @@ architecture Behavioral of dispatch is
 
 	constant isp_nregs : integer := 11;
 	-- timeout, stabDelay, cmdexeDelay, synchLoops, byteDelay, pollValue, pollIndex, cmd1..4
-	signal isp_regs : char_array(0 to isp_nregs-1);
-	signal isp_idx : integer;
+	signal isp_regs, isp_regs_new : char_array(0 to isp_nregs-1);
+	signal isp_idx, isp_idx_new : unsigned(3 downto 0);
 
+	-- **********
+	-- SPI Output
+	-- **********
 	constant ndivbits : integer := 16;
-	signal sckdivcount : unsigned(ndivbits-1 downto 0);
-	signal sckcountto : unsigned(ndivbits-1 downto 0);
-	signal sck_out, sck_strobe, sck_en : std_logic;
+	signal sckcountto : unsigned(ndivbits-1 downto 0);  -- set by a separate process
+	signal sckdivcount, sckdivcount_new : unsigned(ndivbits-1 downto 0);
+	signal sck_int, sck_int_new : std_logic;
+	signal sck_en, sck_en_new : std_logic;
+	signal shifter, shifter_new : std_logic_vector(7 downto 0);
+	signal shiftcount, shiftcount_new : unsigned(2 downto 0);
 
-	signal porta_inc, portb_inc : std_logic;
+	signal spibusy, spibusy_new : std_logic;
+	signal mosi_int, mosi_new : std_logic;
 
-	signal ispbytecount : unsigned(7 downto 0);
-	signal isptx : std_logic;
-	signal isptxbusy : std_logic;
 
-	signal shifter : std_logic_vector(7 downto 0);
-	signal shiftcount : unsigned(2 downto 0);
-
-	-- ***************
-	-- Raw RAM Signals
-	-- ***************
-	signal RAM_OADDR, RAM_IADDR : std_logic_vector(13 downto 0);
-	signal RAM_OUT, RAM_IN : std_logic_vector(31 downto 0);
-	signal RAM_WEN : std_logic_vector(3 downto 0);
 begin
+
+	-- ****************************
+	-- SPI Transciever Subprocesses
+	-- ****************************
+
+	-- The following transciever handles all serial communication with the
+	-- device to be programmed. Timing, polarity and other parameters are
+	-- read from the registers of the dispatch FSM. Data is latched and
+	-- transmission started on a strobe signal from the dispatch FSM. A
+	-- busy signal is available, so there is no need for a final strobe to
+	-- indicate when transmission is complete/data is available.
+
+	SCK <= sck_int;
+	MOSI <= mosi_int;
 
 	-- SCK clock counter value calculator
 	-- Using formula for AVRISP from STK500 datasheet, converted to
 	-- half period in 100 MHz clock tics (T / 2Tc)
+	-- AVR068 pp. 30-31
 	process(clk,rst)
+		variable pipeline, tmp : unsigned(ndivbits-1 downto 0);
 	begin
-		if rst = '1' then
-			sckcountto <= (others => '0');
-		elsif rising_edge(clk) then
-			if stk_sck_duration(7 downto 2) = "000000" then
+		if rising_edge(clk) then
+			if rst = '1' then
+				sckcountto <= (others => '0');
+			elsif stk_sck_duration(7 downto 2) = "000000" then
 				case stk_sck_duration(1 downto 0) is
-					when "00" => sckcountto <= to_unsigned(53,ndivbits);
-					when "01" => sckcountto <= to_unsigned(216,ndivbits);
-					when "10" => sckcountto <= to_unsigned(867,ndivbits);
-					when "11" => sckcountto <= to_unsigned(1735,ndivbits);
+					when "00" => sckcountto <= to_unsigned(53,ndivbits);    -- 925926 Hz
+					when "01" => sckcountto <= to_unsigned(216,ndivbits);   -- 230415 Hz
+					when "10" => sckcountto <= to_unsigned(867,ndivbits);   -- 57604 Hz
+					when "11" => sckcountto <= to_unsigned(1735,ndivbits);  -- 28802 Hz
 					when others => null;
 				end case;
 			else
+				-- FIXME where does '270' come from?
+				tmp := pipeline + to_unsigned(270,ndivbits);
 				if stk_sck_duration(0) = '0' then
-					sckcountto <= 325 * stk_sck_duration + stk_sck_duration(7 downto 1) + to_unsigned(270,ndivbits);
+					sckcountto <= tmp;
 				else
-					sckcountto <= 325 * stk_sck_duration + stk_sck_duration(7 downto 1) + to_unsigned(271,ndivbits);
+					sckcountto <= tmp + "1";
 				end if;
+				-- Pipelined to enable a clock of 100 MHz
+				pipeline := 325 * stk_sck_duration + stk_sck_duration(7 downto 1);
 			end if;
 		end if;
 	end process;
 
-	-- SCK clock divider, also strobe output
-	sckdiv : process(rst,clk)
+	-- SPI FSM
+	spi_sync_proc : process(rst,clk)
 	begin
 		if rst = '1' then
 			sckdivcount <= (others => '0');
-			sck_out <= '0';
-			sck_strobe <= '0';
-		elsif rising_edge(clk) then
-			sck_strobe <= '0';
-			if sck_en = '1' or sck_out = '1' then  -- if sck is disabled during sck=1, nicely wind down
-				if sckdivcount = sckcountto then
-					sckdivcount <= (others => '0');
-					sck_out <= not sck_out;
-					sck_strobe <= '1';
-				else
-					sckdivcount <= sckdivcount + to_unsigned(1,ndivbits);
-				end if;
-			end if;
-		end if;
-	end process;
-
-	-- ISP shift register
-	shiftreg : process(rst,clk)
-		variable old : std_logic;
-		variable bytecount : unsigned(7 downto 0);
-	begin
-		if rst = '1' then
+			sck_int <= '0';
+			sck_en <= '0';
+			sckdivcount <= (others => '0');
 			shifter <= (others => '0');
 			shiftcount <= (others => '0');
-			old := '0';
-			bytecount := (others => '0');
-		elsif falling_edge(clk) then
-			if isptx = '1' then
-				-- Latch Tx data on the rising edge of txen
-				if old = '0' then
-					shifter <= RAM_OUT(7 downto 0);
-					-- RAM_OADDR += 1
-				end if;
-
-				-- MOSI is sampled by AVR on rising edge, MISO available on falling
-				MOSI <= shifter(7);
-				if sck_strobe = '1'  and sck_out = '1' then
-					shifter(7 downto 0) <= shifter(6 downto 0) & MISO;
-					shiftcount <= shiftcount + "1";
-					-- When final bit shifted out, read in next byte
-					if shiftcount = "111" then
-						shifter <= RAM_OUT(7 downto 0);
-						-- RAM_OADDR += 1
-						bytecount := bytecount + X"01";
-					end if;
-				end if;
-			else
-				shiftcount <= (others => '0');
-			end if;
-			old := isptx;
+			spibusy <= '0';
+			mosi_int <= '0';
+		elsif rising_edge(clk) then
+			sck_int <= sck_int_new;
+			sck_en <= sck_en_new;
+			sckdivcount <= sckdivcount_new;
+			shifter <= shifter_new;
+			shiftcount <= shiftcount_new;
+			spibusy <= spibusy_new;
+			mosi_int <= mosi_new;
 		end if;
 	end process;
+
+	spi_comb_proc : process(sck_int, sck_en, sckcountto, sckdivcount, shifter, shiftcount, spibusy, spistrobe, spidata, mosi_int, MISO)
+		variable sckdivcount_next : unsigned(ndivbits-1 downto 0);
+		variable sck_int_next : std_logic;
+		variable sck_en_next : std_logic;
+		variable shifter_next : std_logic_vector(7 downto 0);
+		variable shiftcount_next : unsigned(2 downto 0);
+		variable spibusy_next : std_logic;
+		variable mosi_next : std_logic;
+	begin
+		sck_int_next := sck_int;
+		sck_en_next := sck_en;
+		sckdivcount_next := sckdivcount;
+		shifter_next := shifter;
+		shiftcount_next := shiftcount;
+		spibusy_next := spibusy;
+
+		mosi_next := mosi_int;
+
+		if spibusy = '0' and spistrobe = '1' then
+			spibusy_next := '1';
+			sck_en_next := '1';
+
+			shiftcount_next := (others => '0');
+			sckdivcount_next := (others => '0');
+
+			-- MOSI is sampled by the AVR on the rising edge of SCK.
+			-- Therefore, start with SCK = '0' and the first bit
+			-- already on MOSI. Assuming LSb first.
+			mosi_next := spidata(0);
+			shifter_next := '0' & spidata(7 downto 1);
+			sck_int_next := '0';
+		end if;
+
+		-- sck_en is disabled by this process alone, so can never be disabled
+		-- halfway through a transition.
+		if sck_en = '1' then
+			if sckdivcount = sckcountto then
+				sckdivcount_next := (others => '0');
+				sck_int_next := not sck_int;
+
+				-- Shift a bit in on the rising edge
+				if sck_int_next = '1' then
+					shifter_next(7) := MISO;
+				end if;
+
+				-- Increment the bit counter on the falling edge
+				if sck_int_next = '0' then
+					shiftcount_next := shiftcount + "1";
+
+					if shiftcount = "111" then
+						-- Just shifted out the last bit, so we're done
+						spibusy_next := '0';
+						sck_en_next := '0';
+					else
+						-- Shift out the next bit
+						mosi_next := shifter(0);
+						shifter_next := '0' & shifter(7 downto 1);
+					end if;
+				end if;
+
+			else
+				sckdivcount_next := sckdivcount + "1";
+			end if;
+		end if;
+
+		sck_int_new <= sck_int_next;
+		sck_en_new <= sck_en_next;
+		sckdivcount_new <= sckdivcount_next;
+		shifter_new <= shifter_next;
+		shiftcount_new <= shiftcount_next;
+		spibusy_new <= spibusy_next;
+		mosi_new <= mosi_next;
+	end process;
+
+	-- ***********************
+	-- Backwards compatibility
+	-- ***********************
 
 	process(rst,clk)
 	begin
@@ -259,12 +330,6 @@ begin
 		end if;
 	end process;
 
-
-	sck_en <= '0';
-	isptx <= '0';
-	isptxbusy <= '0';
-	isp_regs <= (others => (others => '0'));
-
 	-- ************
 	-- Dispatch FSM
 	-- ************
@@ -274,7 +339,7 @@ begin
 
 	ringaddr <= std_logic_vector(ringptr);
 
-	sync_proc : process(rst,clk)
+	main_sync_proc : process(rst,clk)
 	begin
 		if rst = '1' then
 			state <= st_start;
@@ -291,6 +356,15 @@ begin
 			stk_init <= (others => '0');
 			stk_sck_duration <= (others => '0');
 
+			isp_regs <= (others => (others => '0'));
+			isp_idx <= x"0";
+
+			numrx <= (others => '0');
+			numtx <= (others => '0');
+
+			spicount <= (others => '0');
+			spidata <= (others => '0');
+			spistrobe <= '0';
 		elsif rising_edge(clk) then
 			state <= state_new;
 
@@ -304,11 +378,21 @@ begin
 			stk_rst_polarity <= stk_rst_polarity_new;
 			stk_init <= stk_init_new;
 			stk_sck_duration <= stk_sck_duration_new;
+
+			isp_regs <= isp_regs_new;
+			isp_idx <= isp_idx_new;
+
+			numrx <= numrx_new;
+			numtx <= numtx_new;
+
+			spicount <= spicount_new;
+			spidata <= spidata_new;
+			spistrobe <= spistrobe_new;
 		end if;
 	end process;
 
 
-	comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration)
+	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
 		variable packetptr_next : unsigned(10 downto 0);
@@ -319,6 +403,13 @@ begin
 		variable stk_rst_polarity_next : std_logic;
 		variable stk_init_next : std_logic_vector(7 downto 0);
 		variable txstrobe_next : std_logic;
+		variable isp_regs_next : char_array(0 to isp_nregs-1);
+		variable isp_idx_next : unsigned(3 downto 0);
+		variable spicount_next : unsigned(8 downto 0);
+		variable spidata_next : std_logic_vector(7 downto 0);
+		variable spistrobe_next : std_logic;
+		variable numtx_next : unsigned(7 downto 0);
+		variable numrx_next : unsigned(7 downto 0);
 	begin
 		-- Pipelined signals
 		msgbodylen_next := msgbodylen;
@@ -331,6 +422,16 @@ begin
 		stk_rst_polarity_next := stk_rst_polarity;
 		stk_init_next := stk_init;
 		stk_sck_duration_next := stk_sck_duration;
+
+		isp_regs_next := isp_regs;
+		isp_idx_next := isp_idx;
+
+		numrx_next := numrx;
+		numtx_next := numtx;
+
+		spicount_next := spicount;
+		spidata_next := spidata;
+		spistrobe_next := '0';
 
 		txstrobe_next := '0';
 
@@ -364,6 +465,7 @@ begin
 			when st_storeseq =>
 				-- Received sequence number will be sent back
 				txaddr <= "000" & x"01";
+				-- FIXME possible critical path
 				txdata <= ringdata;
 				txwr <= '1';
 
@@ -397,21 +499,27 @@ begin
 			when st_storecmd =>
 				-- Answer ID is usually identical to the received command ID
 				txaddr <= "000" & x"05";
+				-- FIXME possible critical path
 				txdata <= ringdata;
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
---				ringptr_next := ringptr + "1";  -- On exit from this state, ringptr points after cmd
+				-- Current ringpointer address is cmd+1, so byte after command will
+				-- be available in next state. Increment it, so that commands that
+				-- need to read multiple bytes can without an extra state. Don't worry
+				-- about commands with no parameters, as packetptr is used to set
+				-- the correct ringptr once the command is complete.
+				ringptr_next := ringptr + "1";
 
 				case ringdata is
 					when CMD_SIGN_ON => state_new <= st_signon1;
 					when CMD_GET_PARAMETER => state_new <= st_getparam1;
 					when CMD_SET_PARAMETER => state_new <= st_setparam1;
---					when CMD_ENTER_PROGMODE_ISP =>
---						state_new <= st_ispinit1;
---						isp_idx <= 0;
---					when CMD_LEAVE_PROGMODE_ISP =>
---						state_new <= st_ispfin1;
+					when CMD_ENTER_PROGMODE_ISP =>
+						state_new <= st_ispinit1;
+						isp_idx_next := x"0";
+					when CMD_LEAVE_PROGMODE_ISP => state_new <= st_ispfin1;
+					when CMD_SPI_MULTI => state_new <= st_ispmulti1;
 --					when CMD_READ_SIGNATURE_ISP => state_new <= st_ispreadsig1;
 					when others => state_new <= st_cmdunknown;
 				end case;
@@ -492,6 +600,7 @@ begin
 			when st_signon3 =>
 				-- 7 preceeding bytes for header
 				txaddr <= "0000000" & std_logic_vector(strlen + x"8");
+				-- This next operation creates an asynchronous RAM
 				txdata <= MODEL(to_integer(strlen));
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
@@ -554,7 +663,7 @@ begin
 			-- *****************
 
 			when st_setparam1 =>
-				-- Write status to x0004
+				-- Write status
 				txaddr <= "000" & X"06";
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
@@ -588,33 +697,116 @@ begin
 				end if;
 				state_new <= st_fin1;
 
---			-- CMD_ENTER_PROGMODE_ISP
---			when st_ispinit1 =>
---				isp_regs(isp_idx) <= ringdata;
---				ringptr_next := ringptr + "1";
---				if isp_idx = isp_nregs-1 then
---					state_new <= st_ispinit2;
---				else
---					isp_idx <= isp_idx + 1;
---				end if;
+			-- **********************
+			-- CMD_ENTER_PROGMODE_ISP
+			-- **********************
 
---			when st_ispinit2 =>
---				-- Write status to x0004
---				txaddr <= "000" & X"04";
---				txwr <= '1';
---				msgbodylen_next := msgbodylen + "1";
---				txdata <= STATUS_CMD_OK;
---				state_new <= st_fin1;
+			when st_ispinit1 =>
+				isp_regs_next(to_integer(isp_idx)) := ringdata;
+				ringptr_next := ringptr + x"1";
+				if isp_idx = to_unsigned(isp_nregs-1,3) then
+					state_new <= st_ispinit2;
+				else
+					isp_idx_next := isp_idx + x"1";
+				end if;
 
---			-- CMD_LEAVE_PROGMODE_ISP
---			when st_ispfin1 =>
---				-- Write status to x0004
---				txaddr <= "000" & X"04";
---				txwr <= '1';
---				msgbodylen_next := msgbodylen + "1";
---				txdata <= STATUS_CMD_OK;
---				state_new <= st_fin1;
+			when st_ispinit2 =>
+				-- Write status OK
+				txaddr <= "000" & X"06";
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
 
+				state_new <= st_fin1;
+
+			-- **********************
+			-- CMD_LEAVE_PROGMODE_ISP
+			-- **********************
+			when st_ispfin1 =>
+				-- Write status OK
+				txaddr <= "000" & X"06";
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				state_new <= st_fin1;
+
+			-- **********************
+			-- CMD_SPI_MULTI
+			-- **********************
+			when st_ispmulti1 =>
+				-- Write status OK
+				txaddr <= "000" & X"06";
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				-- Get number of transmit bytes
+				numtx_next := unsigned(ringdata);
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_ispmulti2;
+
+			when st_ispmulti2 =>
+				-- Get number of receive bytes
+				numrx_next := unsigned(ringdata);
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_ispmulti3;
+
+			when st_ispmulti3 =>
+				-- Write second status OK after received data
+				-- TODO make a test to check there's no overflow here
+				txaddr <= "00" & std_logic_vector(('0' & numrx) + x"07");
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				target_next := ringdata; -- RxStartAddr
+
+				-- Current ringpointer address points to the first data byte
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_ispmultitx;
+
+				spicount_next := (others => '0');
+
+			when st_ispmultitx =>
+
+				if spicount >= numtx then
+					-- Transmit nulls as padding
+					spidata_next := (others => '0');
+				else
+					spidata_next := ringdata;
+				end if;
+
+				if spicount >= unsigned(target) + numrx and spicount >= numtx then
+				   state_new <= st_fin1;
+				else
+					spistrobe_next := '1';
+					state_new <= st_ispmultiwait;
+				end if;
+
+			when st_ispmultiwait =>
+				txdata <= shifter;
+
+				if spistrobe = '1' or spibusy = '1' then
+					state_new <= st_ispmultiwait;
+				else
+					spicount_next := spicount + "1";
+
+					-- Write the byte received from the device to the response buffer
+					if spicount >= unsigned(target) then
+						txaddr <= '0' & std_logic_vector(('0' & spicount) - unsigned(target) + x"07");
+						txwr <= '1';
+						msgbodylen_next := msgbodylen + "1";
+					end if;
+
+					-- Advance the ring pointer
+					ringptr_next := ringptr + "1";
+
+					state_new <= st_ispmultitx;
+				end if;
 
 --			-- CMD_READ_SIGNATURE_ISP
 --			when st_ispreadsig1 =>
@@ -684,50 +876,16 @@ begin
 		stk_rst_polarity_new <= stk_rst_polarity_next;
 		stk_init_new <= stk_init_next;
 		stk_sck_duration_new <= stk_sck_duration_next;
+
+		isp_regs_new <= isp_regs_next;
+		isp_idx_new <= isp_idx_next;
+
+		numrx_new <= numrx_next;
+		numtx_new <= numtx_next;
+
+		spicount_new <= spicount_next;
+		spidata_new <= spidata_next;
+		spistrobe_new <= spistrobe_next;
 	end process;
-
-	-- *****************
-	-- Output Packet RAM
-	-- *****************
-
-	-- Storage for the STK500 response packet, also receives data from the
-	-- device as needed.
-
-	ISPringbuf : RAMB16BWER
-	generic map (
-		DATA_WIDTH_A => 9,
-		DATA_WIDTH_B => 9,
-		DOA_REG => 0,
-		DOB_REG => 0,
-		EN_RSTRAM_A => TRUE,
-		EN_RSTRAM_B => TRUE,
-		INIT_FILE => "NONE",
-		RSTTYPE => "SYNC",
-		RST_PRIORITY_A => "CE",
-		RST_PRIORITY_B => "CE",
-		SIM_COLLISION_CHECK => "ALL",
-		SIM_DEVICE => "SPARTAN6"
-	)
-	port map (
-		-- Port A, READ
-		DOA => RAM_OUT,     -- 32-bit output: data output
-		ADDRA => RAM_OADDR, -- 14-bit input: address input, low three are unused
-		CLKA => CLK,        -- 1-bit input: clock input
-		ENA => '1',         -- 1-bit input: enable input
-		WEA => X"0",        -- 4-bit input: byte-wide write enable input
-		DIA => X"00000000", -- 32-bit input: data input
-		DIPA => "0000",     -- 4-bit input: parity input
-		REGCEA => '0',      -- 1-bit input: register clock enable input
-		RSTA => '0',        -- 1-bit input: register set/reset input
-		-- Port B, WRITE
-		DIB => RAM_IN,      -- 32-bit input: data input
-		ADDRB => RAM_IADDR, -- 14-bit input: address input, low three are unused
-		CLKB => clk,        -- 1-bit input: clock input
-		ENB => '1',         -- 1-bit input: enable input
-		WEB => RAM_WEN,     -- 4-bit input: byte-wide write enable input, must all be 1 or odd bytes won't be written
-		DIPB => "0000",     -- 4-bit input: parity input
-		REGCEB => '0',      -- 1-bit input: register clock enable input
-		RSTB => '0'         -- 1-bit input: register set/reset input
-	);
 
 end Behavioral;
