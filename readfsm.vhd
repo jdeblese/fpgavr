@@ -81,7 +81,7 @@ architecture Behavioral of readfsm is
 
 	type state_type is (st_start, st_seq, st_szhi, st_szlo, st_token, st_rcv, st_cksum,
 	                    st_tokenerr, st_ckerr);
-	signal state, next_state, return_state, return_state_new : state_type;
+	signal state, next_state : state_type;
 
 	signal cksum, cksum_new : std_logic_vector(7 downto 0);
 
@@ -101,13 +101,9 @@ begin
 			-- IO
 			cmdstrobe_int <= '0';
 			-- Memory
-			cksum <= (others => '0');
 			ringptr <= (others => '0');
-			oldptr <= (others => '0');
-			rxlen <= (others => '0');
 			-- FSM
 			state <= st_start;
-			return_state <= st_start;
 		elsif rising_edge(clk) then
 			-- IO
 			cmdstrobe_int <= cmdstrobe_new;
@@ -118,12 +114,11 @@ begin
 			rxlen <= rxlen_new;
 			-- FSM
 			state <= next_state;
-			return_state <= return_state_new;
 		end if;
 	end process;
 
 	-- Combinatorial logic
-	comb_proc : process(state,uart_strobe,uart_data,rxlen,cksum,ringptr,oldptr,return_state,rxlen)
+	comb_proc : process(state,uart_strobe,uart_data,rxlen,cksum,ringptr,oldptr)
 		variable ringptr_next : unsigned(10 downto 0);
 		variable oldptr_next : unsigned(10 downto 0);
 		variable cksum_next : std_logic_vector(7 downto 0);
@@ -132,7 +127,6 @@ begin
 	begin
 
 		next_state <= state;
-		return_state_new <= return_state;
 		ring_wr <= '0';
 		readerr <= '0';
 		tokenerr <= '0';
