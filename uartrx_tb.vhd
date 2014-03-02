@@ -25,25 +25,16 @@
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.ALL;
- 
+use ieee.numeric_std.all;
+
 -- Uncomment the following library declaration if using
 -- arithmetic functions with Signed or Unsigned values
 --USE ieee.numeric_std.ALL;
- 
+
 ENTITY uartrx_tb IS
 END uartrx_tb;
- 
-ARCHITECTURE behavior OF uartrx_tb IS 
- 
-	component uartrx
-		Port (
-			rx     : in std_logic;
-			strobe : out std_logic;
-			data   : out std_logic_vector(7 downto 0);
-			ferror : out std_logic;
-			clk    : in STD_LOGIC;
-			rst    : in STD_LOGIC);
-	end component;
+
+ARCHITECTURE behavior OF uartrx_tb IS
 
 	--Inputs
 	signal rx : std_logic := '1';
@@ -58,11 +49,24 @@ ARCHITECTURE behavior OF uartrx_tb IS
 	-- Clock period definitions
 	constant clk_period : time := 10 ns;
 	constant baud_period : time := 8.6805555555 us;
- 
+	signal finished : std_logic := '0';
+
+	signal baudclk : std_logic := '0';
+	signal run : std_logic := '0';
+
+	-- Test vector
+	type char_array is array (integer range<>) of std_logic_vector(7 downto 0);
+	constant STRLEN : integer := 3;
+	constant TEST : char_array(0 to STRLEN-1) := (x"41", x"00", x"ff");
+	signal current : std_logic_vector(7 downto 0);
+
+	signal strobed : std_logic;
+	signal srst : std_logic := '1';
+
 BEGIN
- 
+
 	-- Instantiate the Unit Under Test (UUT)
-	uut: uartrx PORT MAP (
+	uut : entity work.uartrx PORT MAP (
 		rx => rx,
 		strobe => strobe,
 		data => data,
@@ -72,58 +76,123 @@ BEGIN
 	);
 
 	-- Clock process definitions
-	clk_process :process
+	clk <= not clk after clk_period/2 when finished /= '1' else '0';
+	baudclk <= not baudclk after baud_period/2 when run = '1' else '0';
+
+	-- Strobe detection
+	strobedet_proc : process(rst,clk)
 	begin
-		clk <= '0';
-		wait for clk_period/2;
-		clk <= '1';
-		wait for clk_period/2;
+		if srst = '1' then
+			strobed <= '0';
+		elsif rising_edge(clk) then
+			if strobe = '1' then
+				strobed <= '1';
+			end if;
+		end if;
 	end process;
- 
 
 	-- Stimulus process
 	stim_proc: process
-	begin		
+	begin
 		-- hold reset state for 100 ns.
 		wait for 100 ns;
+		wait until falling_edge(clk);
 		rst <= '0';
+		srst <= '0';
+		wait for clk_period*2;
+		wait until falling_edge(clk);
 
-		wait for 10*clk_period;
+		-- Test a few specific values. Neccessary, considering below?
+		for B in 0 to STRLEN-1 loop
+			-- Single byte transmission
+			current <= TEST(B);
+			run <= '1';
+			rx <= '0';
+			wait for baud_period;
+			for I in 0 to 7 loop
+				rx <= current(I);
+				wait for baud_period;
+			end loop;
+			rx <= '1';
+			wait for baud_period;
+			run <= '0';
+			-- Check output data and strobe
+			wait for clk_period;
+			wait until rising_edge(clk);
+			assert data = current report "Mismatch between transmitted and received data" severity error;
+			assert ferror = '0' report "Framing error reported where there is none" severity error;
+			assert strobed = '1' report "Strobe did not fire" severity error;
+			assert data /= current report "Byte was correctly received" severity note;
+			-- Extra pause
+			srst <= '1';
+			wait for baud_period * 3;
+			srst <= '0';
+		end loop;
 
-		rx <= '0';  -- Start
-		wait for baud_period;
-		rx <= '1';
-		wait for baud_period;
+		-- Test a framing error
+		current <= "10000011";
+		run <= '1';
 		rx <= '0';
 		wait for baud_period;
+		for I in 0 to 7 loop
+			rx <= current(I);
+			wait for baud_period;
+		end loop;
+		rx <= '0';  -- ERROR!
+		wait for baud_period;
+		run <= '0';
+		-- Check output data, strobe and error
+		wait for clk_period;
+		wait until rising_edge(clk);
+		assert ferror = '1' report "Framing error sent, not reported" severity error;
+		assert strobed = '1' report "Strobe did not fire" severity error;
+		assert ferror /= '1' report "Framing error correctly detected" severity note;
+		-- Extra pause
+		wait for baud_period * 3;
 		rx <= '1';
-		wait for baud_period;
-		rx <= '0';
-		wait for baud_period;
-		rx <= '1';
-		wait for baud_period;
-		rx <= '1';
-		wait for baud_period;
-		rx <= '0';
-		wait for baud_period;
-		rx <= '1';
-		wait for baud_period;
-		rx <= '1';  -- Stop
-		wait for baud_period;
 
-		-- Framing error
-		rx <= '0';  -- Start
-		wait for baud_period;
-		rx <= '1';
-		wait for baud_period;
-		rx <= '0';
-		wait for 6*baud_period;
-		rx <= '1';
-		wait for baud_period;
-		rx <= '0';  -- Stop
-		wait for baud_period;
+		-- Reset again
+		rst <= '1';
+		srst <= '1';
+		wait for clk_period * 2;
+		rst <= '0';
+		srst <= '0';
+		wait for clk_period*2;
+		wait until falling_edge(clk);
+		assert ferror = '0' report "Reset was not sucessful, ferror /= '0'" severity error;
+		assert strobe = '0' report "Reset was not sucessful, strobe /= '0'" severity error;
+		assert strobed = '0' report "Reset was not sucessful, strobed /= '0'" severity error;
 
-		wait;
+		-- Test all 8-bit values
+		for B in 0 to 255 loop
+			-- Single byte transmission
+			current <= std_logic_vector(to_unsigned(B,8));
+			run <= '1';
+			rx <= '0';
+			wait for baud_period;
+			for I in 0 to 7 loop
+				rx <= current(I);
+				wait for baud_period;
+			end loop;
+			rx <= '1';
+			wait for baud_period;
+			run <= '0';
+			-- Check output data and strobe
+			wait for clk_period;
+			wait until rising_edge(clk);
+			assert data = current report "Mismatch between transmitted and received data" severity error;
+			assert ferror = '0' report "Framing error reported where there is none" severity error;
+			assert strobed = '1' report "Strobe did not fire" severity error;
+			-- Extra pause
+			srst <= '1';
+			wait for baud_period * 3;
+			srst <= '0';
+		end loop;
+
+		finished <= '1';
+		rst <= '1';
+		assert false report "Testbench complete" severity note;
+
 	end process;
 
 END;
