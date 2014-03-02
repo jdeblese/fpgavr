@@ -51,6 +51,7 @@ use IEEE.NUMERIC_STD.ALL;
 library UNISIM;
 use UNISIM.VComponents.all;
 
+use work.stk500def.all;
 use work.readfsm_pkg.all;
 
 entity readfsm is
@@ -146,7 +147,7 @@ begin
 		case state is
 			when st_start =>  -- Wait for a start byte
 				oldptr_next := ringptr;
-				if uart_strobe = '1' and uart_data = X"1B" then
+				if uart_strobe = '1' and uart_data = MESSAGE_START then
 					cksum_next := uart_data;
 					next_state <= st_seq;
 				end if;
@@ -190,7 +191,7 @@ begin
 				if uart_strobe = '1' then
 					cksum_next := uart_data xor cksum;
 					-- Verify the token
-					if uart_data = X"0E" then
+					if uart_data = TOKEN then
 						next_state <= st_rcv;
 					else
 						next_state <= st_tokenerr;
