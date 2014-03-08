@@ -150,8 +150,8 @@ architecture Behavioral of dispatch is
 	signal stk_rst_polarity, stk_rst_polarity_new : std_logic;  -- RESET flag polarity
 	signal stk_init, stk_init_new : std_logic_vector(7 downto 0);
 
-	constant isp_nregs : integer := 11;
-	-- timeout, stabDelay, cmdexeDelay, synchLoops, byteDelay, pollValue, pollIndex, cmd1..4
+	constant isp_nregs : integer := 7;
+	-- timeout, stabDelay, cmdexeDelay, synchLoops, byteDelay, pollValue, pollIndex
 	signal isp_regs, isp_regs_new : char_array(0 to isp_nregs-1);
 	signal isp_idx, isp_idx_new : unsigned(3 downto 0);
 
@@ -268,9 +268,9 @@ begin
 
 			-- MOSI is sampled by the AVR on the rising edge of SCK.
 			-- Therefore, start with SCK = '0' and the first bit
-			-- already on MOSI. Assuming LSb first.
-			mosi_next := spidata(0);
-			shifter_next := '0' & spidata(7 downto 1);
+			-- already on MOSI. Data is MSb first.
+			mosi_next := spidata(7);
+			shifter_next := spidata(6 downto 0) & '0';
 			sck_int_next := '0';
 		end if;
 
@@ -283,7 +283,7 @@ begin
 
 				-- Shift a bit in on the rising edge
 				if sck_int_next = '1' then
-					shifter_next(7) := MISO;
+					shifter_next(0) := MISO;
 				end if;
 
 				-- Increment the bit counter on the falling edge
@@ -296,8 +296,8 @@ begin
 						sck_en_next := '0';
 					else
 						-- Shift out the next bit
-						mosi_next := shifter(0);
-						shifter_next := '0' & shifter(7 downto 1);
+						mosi_next := shifter(7);
+						shifter_next := shifter(6 downto 0) & '0';
 					end if;
 				end if;
 
@@ -354,7 +354,7 @@ begin
 			target <= (others => '0');
 			stk_rst_polarity <= '1';
 			stk_init <= (others => '0');
-			stk_sck_duration <= (others => '0');
+			stk_sck_duration <= "00000011";
 
 			isp_regs <= (others => (others => '0'));
 			isp_idx <= x"0";
@@ -708,19 +708,21 @@ begin
 				isp_regs_next(to_integer(isp_idx)) := ringdata;
 				ringptr_next := ringptr + x"1";
 				if isp_idx = to_unsigned(isp_nregs-1,3) then
-					state_new <= st_ispinit2;
+					state_new <= st_ispmultitx;
+					msgbodylen_next := msgbodylen + "1";
 				else
 					isp_idx_next := isp_idx + x"1";
 				end if;
 
-			when st_ispinit2 =>
 				-- Write status OK
 				txaddr <= "000" & X"06";
 				txdata <= STATUS_CMD_OK;
 				txwr <= '1';
-				msgbodylen_next := msgbodylen + "1";
 
-				state_new <= st_fin1;
+				-- Set up a CMD_SPI_MULTI
+				numtx_next := x"04";
+				numrx_next := x"00";
+				target_next := x"00";
 
 			-- **********************
 			-- CMD_LEAVE_PROGMODE_ISP
@@ -767,7 +769,8 @@ begin
 
 				target_next := ringdata; -- RxStartAddr
 
-				-- Current ringpointer address points to the first data byte
+				-- Current ringpointer address points to the first data byte,
+				-- so that data byte will be available in the next state
 				ringptr_next := ringptr + "1";
 
 				state_new <= st_ispmultitx;
@@ -805,7 +808,8 @@ begin
 						msgbodylen_next := msgbodylen + "1";
 					end if;
 
-					-- Advance the ring pointer
+					-- Advance the ring pointer. Data will still be available
+					-- for the one cycle spent in the multitx state
 					ringptr_next := ringptr + "1";
 
 					state_new <= st_ispmultitx;
