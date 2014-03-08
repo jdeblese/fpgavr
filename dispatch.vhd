@@ -392,6 +392,10 @@ begin
 	end process;
 
 
+	-- TODO Dispatcher should respond to a ReadFSM checksum error
+	--      by transmitting a ANSWER_CKSUM_ERROR response and resetting
+	--      the ReadFSM.
+
 	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
@@ -723,6 +727,15 @@ begin
 				numtx_next := x"04";
 				numrx_next := x"00";
 				target_next := x"00";
+
+				-- TODO do error checking, using pollValue and pollIndex register
+				-- TODO this state should drive POWER and RESET pins to enter and
+				--      exit programming state
+				-- TODO meaning of stabDelay, cmdexecDelay, synchLoops, byteDelay?
+				--      * Does byteDelay only apply to the ENTER command bytes?
+				--      * Is stabDelay the delay from power on to start SPI communication?
+				--      * If ENTER fails, loop synchLoops times?
+				--      * Under what conditions does this command time out?
 
 			-- **********************
 			-- CMD_LEAVE_PROGMODE_ISP
