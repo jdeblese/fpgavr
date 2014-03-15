@@ -92,10 +92,11 @@ architecture Behavioral of dispatch is
 	    st_storeseq, st_getlenhi, st_getlenlo,
 	    st_getparam1, st_getparam2,
 	    st_setparam1, st_setparam2,
-		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4, 
+		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4,
 	    st_signon1, st_signon2, st_signon3,
 	    st_ispinit1, st_ispinit2, st_ispfin1,
-	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3, 
+		st_isperase1, st_isperase2, st_isperase3, st_isperasetx, st_isperasewait,
+	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3,
 	    st_ispreadflash_cmd, st_ispreadflash_msb, st_ispreadflash_lsb, st_ispreadflash_dat,
 	    st_ispreadflash_cmdwait, st_ispreadflash_msbwait, st_ispreadflash_lsbwait, st_ispreadflash_datwait,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
@@ -174,8 +175,45 @@ architecture Behavioral of dispatch is
 	signal spibusy, spibusy_new : std_logic;
 	signal mosi_int, mosi_new : std_logic;
 
+	-- Timer signals
+	signal timer_set, timer_set_new : std_logic;
+	signal timer_busy : std_logic;
 
 begin
+
+	-- ****************
+	-- Timer Subprocess
+	-- ****************
+
+	tproc : process(clk,rst,timer_set)
+		variable en : std_logic;
+		variable clkdiv : unsigned(16 downto 0);
+		variable count : unsigned(7 downto 0);
+	begin
+		if rising_edge(clk) then
+			if rst = '1' then
+				clkdiv := (others => '0');
+				en := '0';
+				timer_busy <= '0';
+			elsif en = '1' then
+				if clkdiv = '1' & x"869F" then
+					clkdiv := (others => '0');
+					if count = "1" then
+						en := '0';
+						timer_busy <= '0';
+					end if;
+					count := count - "1";
+				else
+					clkdiv := clkdiv + "1";
+				end if;
+			elsif timer_set = '1' then
+				clkdiv := (others => '0');
+				en := '1';
+				timer_busy <= '1';
+				count := unsigned(target);
+			end if;
+		end if;
+	end process;
 
 	-- ****************************
 	-- SPI Transciever Subprocesses
@@ -359,7 +397,7 @@ begin
 			target <= (others => '0');
 			stk_rst_polarity <= '1';
 			stk_init <= (others => '0');
-			stk_sck_duration <= "00000011";
+			stk_sck_duration <= "00000001";
 
 			isp_regs <= (others => (others => '0'));
 			isp_idx <= x"0";
@@ -370,6 +408,8 @@ begin
 			spicount <= (others => '0');
 			spidata <= (others => '0');
 			spistrobe <= '0';
+
+			timer_set <= '0';
 		elsif rising_edge(clk) then
 			state <= state_new;
 
@@ -394,6 +434,8 @@ begin
 			spicount <= spicount_new;
 			spidata <= spidata_new;
 			spistrobe <= spistrobe_new;
+
+			timer_set <= timer_set_new;
 		end if;
 	end process;
 
@@ -402,7 +444,7 @@ begin
 	--      by transmitting a ANSWER_CKSUM_ERROR response and resetting
 	--      the ReadFSM.
 
-	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, stk_memaddr, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter)
+	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, stk_memaddr, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter, timer_set, timer_busy)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
 		variable packetptr_next : unsigned(10 downto 0);
@@ -447,11 +489,13 @@ begin
 
 		txstrobe_next := '0';
 
+
 		-- Non-pipelined signals
 		state_new <= state;
 		txaddr <= (others => '0');
 		txdata <= (others => '0');
 		txwr <= '0';
+		timer_set_new <= '0';
 
 		case state is
 			when st_start =>  -- Wait for confirmation of a command received
@@ -531,6 +575,7 @@ begin
 						state_new <= st_ispinit1;
 						isp_idx_next := x"0";
 					when CMD_LEAVE_PROGMODE_ISP => state_new <= st_ispfin1;
+					when CMD_CHIP_ERASE_ISP => state_new <= st_isperase1;
 					when CMD_READ_FLASH_ISP => state_new <= st_ispreadflash1;
 					when CMD_SPI_MULTI => state_new <= st_ispmulti1;
 --					when CMD_READ_SIGNATURE_ISP => state_new <= st_ispreadsig1;
@@ -787,6 +832,62 @@ begin
 				state_new <= st_fin1;
 
 			-- ******************
+			-- CMD_CHIP_ERASE_ISP
+			-- ******************
+			when st_isperase1 =>
+				-- Write status OK
+				txaddr <= "000" & X"06";
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				-- Get erase delay
+				target_next := ringdata;
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_isperase2;
+
+			when st_isperase2 =>
+				-- FIXME ignoring the poll method, not good
+
+				-- Current ringpointer address points to the first data byte,
+				-- so that data byte will be available in the next state
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_isperasetx;
+
+				spicount_next := (others => '0');
+
+			when st_isperasetx =>
+				spidata_next := ringdata;
+
+				if spicount >= x"4" then
+					state_new <= st_isperase3;
+					timer_set_new <= '1';
+				else
+					spistrobe_next := '1';
+					state_new <= st_isperasewait;
+				end if;
+
+			when st_isperasewait =>
+
+				if spistrobe = '0' and spibusy = '0' then
+					spicount_next := spicount + "1";
+
+					-- Advance the ring pointer. Data will still be available
+					-- for the one cycle spent in the erasetx state
+					ringptr_next := ringptr + "1";
+
+					state_new <= st_isperasetx;
+				end if;
+
+			when st_isperase3 =>
+				if timer_set = '0' and timer_busy = '0' then
+					state_new <= st_fin1;
+				end if;
+
+
+			-- ******************
 			-- CMD_READ_FLASH_ISP
 			-- ******************
 
@@ -932,7 +1033,7 @@ begin
 				end if;
 
 				if spicount >= unsigned(target) + numrx and spicount >= numtx then
-				   state_new <= st_fin1;
+					state_new <= st_fin1;
 				else
 					spistrobe_next := '1';
 					state_new <= st_ispmultiwait;

@@ -71,7 +71,8 @@ begin
 
 	-- Sample clock, strobe at the center of each bit
 	clkdiv : process(rst,clk)
-		constant countto : unsigned := to_unsigned(53,ndivcountbits);  -- Count to    53, 16*115740   Hz @ 100 MHz, error 0.468%
+--		constant countto : unsigned := to_unsigned(53,ndivcountbits);  -- Count to    53, 16*115740   Hz @ 100 MHz, error 0.468%
+		constant countto : unsigned := to_unsigned(26,ndivcountbits);  -- 231481 Hz, for 230400 Hz
 	begin
 		if rst = '1' then
 			divcount <= (others => '0');

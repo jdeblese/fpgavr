@@ -75,7 +75,8 @@ begin
 
 	-- Strobe at the center of each bit
 	clkdiv : process(rst,clk)
-		constant countto : std_logic_vector(13 downto 0) := "00001101100011";  -- Count to   867, 115207   Hz @ 100 MHz
+--		constant countto : std_logic_vector(13 downto 0) := "00001101100011";  -- Count to   867, 115207   Hz @ 100 MHz
+		constant countto : std_logic_vector(13 downto 0) := "00000110100000";  -- 231481 Hz, for 230400 Hz
 --		constant countto : std_logic_vector(13 downto 0) := "10100010110000";  -- Count to 10416,   9599.7 Hz @ 100 MHz
 	begin
 		if rst = '1' then
