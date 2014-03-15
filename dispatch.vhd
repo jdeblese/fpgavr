@@ -92,8 +92,12 @@ architecture Behavioral of dispatch is
 	    st_storeseq, st_getlenhi, st_getlenlo,
 	    st_getparam1, st_getparam2,
 	    st_setparam1, st_setparam2,
+		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4, 
 	    st_signon1, st_signon2, st_signon3,
 	    st_ispinit1, st_ispinit2, st_ispfin1,
+	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3, 
+	    st_ispreadflash_cmd, st_ispreadflash_msb, st_ispreadflash_lsb, st_ispreadflash_dat,
+	    st_ispreadflash_cmdwait, st_ispreadflash_msbwait, st_ispreadflash_lsbwait, st_ispreadflash_datwait,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
 		st_ispmulti1, st_ispmulti2, st_ispmulti3, st_ispmultitx, st_ispmultiwait,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
@@ -103,10 +107,10 @@ architecture Behavioral of dispatch is
 	signal target, target_new : std_logic_vector(7 downto 0);
 
 	-- registers for number of bytes to receive and to transmit
-	signal numrx, numrx_new : unsigned(7 downto 0);
+	signal numrx, numrx_new : unsigned(15 downto 0);
 	signal numtx, numtx_new : unsigned(7 downto 0);
 	-- counter for the number of bytes transmitted
-	signal spicount, spicount_new : unsigned(8 downto 0);
+	signal spicount, spicount_new : unsigned(16 downto 0);
 	-- data to be transmitted over the SPI link
 	signal spidata, spidata_new : std_logic_vector(7 downto 0);
 	-- strobe signal indicating data valid
@@ -149,6 +153,7 @@ architecture Behavioral of dispatch is
 	signal stk_sck_duration, stk_sck_duration_new : unsigned(7 downto 0);
 	signal stk_rst_polarity, stk_rst_polarity_new : std_logic;  -- RESET flag polarity
 	signal stk_init, stk_init_new : std_logic_vector(7 downto 0);
+	signal stk_memaddr, stk_memaddr_new : unsigned(31 downto 0);
 
 	constant isp_nregs : integer := 7;
 	-- timeout, stabDelay, cmdexeDelay, synchLoops, byteDelay, pollValue, pollIndex
@@ -378,6 +383,7 @@ begin
 			stk_rst_polarity <= stk_rst_polarity_new;
 			stk_init <= stk_init_new;
 			stk_sck_duration <= stk_sck_duration_new;
+			stk_memaddr <= stk_memaddr_new;
 
 			isp_regs <= isp_regs_new;
 			isp_idx <= isp_idx_new;
@@ -396,7 +402,7 @@ begin
 	--      by transmitting a ANSWER_CKSUM_ERROR response and resetting
 	--      the ReadFSM.
 
-	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter)
+	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, stk_memaddr, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
 		variable packetptr_next : unsigned(10 downto 0);
@@ -406,14 +412,15 @@ begin
 		variable stk_sck_duration_next : unsigned(7 downto 0);
 		variable stk_rst_polarity_next : std_logic;
 		variable stk_init_next : std_logic_vector(7 downto 0);
+		variable stk_memaddr_next : unsigned(31 downto 0);
 		variable txstrobe_next : std_logic;
 		variable isp_regs_next : char_array(0 to isp_nregs-1);
 		variable isp_idx_next : unsigned(3 downto 0);
-		variable spicount_next : unsigned(8 downto 0);
+		variable spicount_next : unsigned(16 downto 0);
 		variable spidata_next : std_logic_vector(7 downto 0);
 		variable spistrobe_next : std_logic;
 		variable numtx_next : unsigned(7 downto 0);
-		variable numrx_next : unsigned(7 downto 0);
+		variable numrx_next : unsigned(15 downto 0);
 	begin
 		-- Pipelined signals
 		msgbodylen_next := msgbodylen;
@@ -426,6 +433,7 @@ begin
 		stk_rst_polarity_next := stk_rst_polarity;
 		stk_init_next := stk_init;
 		stk_sck_duration_next := stk_sck_duration;
+		stk_memaddr_next := stk_memaddr;
 
 		isp_regs_next := isp_regs;
 		isp_idx_next := isp_idx;
@@ -447,7 +455,6 @@ begin
 
 		case state is
 			when st_start =>  -- Wait for confirmation of a command received
-				msgbodylen_next := x"0000";
 
 				if cmdstrobe = '1' then
 					state_new <= st_storeseq;
@@ -506,7 +513,7 @@ begin
 				-- FIXME possible critical path
 				txdata <= ringdata;
 				txwr <= '1';
-				msgbodylen_next := msgbodylen + "1";
+				msgbodylen_next := x"0001";
 
 				-- Current ringpointer address is cmd+1, so byte after command will
 				-- be available in next state. Increment it, so that commands that
@@ -519,10 +526,12 @@ begin
 					when CMD_SIGN_ON => state_new <= st_signon1;
 					when CMD_GET_PARAMETER => state_new <= st_getparam1;
 					when CMD_SET_PARAMETER => state_new <= st_setparam1;
+					when CMD_LOAD_ADDRESS => state_new <= st_loadaddr1;
 					when CMD_ENTER_PROGMODE_ISP =>
 						state_new <= st_ispinit1;
 						isp_idx_next := x"0";
 					when CMD_LEAVE_PROGMODE_ISP => state_new <= st_ispfin1;
+					when CMD_READ_FLASH_ISP => state_new <= st_ispreadflash1;
 					when CMD_SPI_MULTI => state_new <= st_ispmulti1;
 --					when CMD_READ_SIGNATURE_ISP => state_new <= st_ispreadsig1;
 					when others => state_new <= st_cmdunknown;
@@ -704,6 +713,34 @@ begin
 				end if;
 				state_new <= st_fin1;
 
+			-- *************
+			-- CMD_LOAD_ADDR
+			-- *************
+
+			when st_loadaddr1 =>
+				ringptr_next := ringptr + "1";
+				stk_memaddr_next(31 downto 24) := unsigned(ringdata);
+				state_new <= st_loadaddr2;
+
+			when st_loadaddr2 =>
+				ringptr_next := ringptr + "1";
+				stk_memaddr_next(23 downto 16) := unsigned(ringdata);
+				state_new <= st_loadaddr3;
+
+			when st_loadaddr3 =>
+				ringptr_next := ringptr + "1";
+				stk_memaddr_next(15 downto  8) := unsigned(ringdata);
+				state_new <= st_loadaddr4;
+
+			when st_loadaddr4 =>
+				ringptr_next := ringptr + "1";
+				stk_memaddr_next( 7 downto  0) := unsigned(ringdata);
+				state_new <= st_fin1;
+				-- Write status
+				txaddr <= "000" & X"06";
+				txwr <= '1';
+				txdata <= STATUS_CMD_OK;
+
 			-- **********************
 			-- CMD_ENTER_PROGMODE_ISP
 			-- **********************
@@ -725,7 +762,7 @@ begin
 
 				-- Set up a CMD_SPI_MULTI
 				numtx_next := x"04";
-				numrx_next := x"00";
+				numrx_next := x"0000";
 				target_next := x"00";
 
 				-- TODO do error checking, using pollValue and pollIndex register
@@ -749,6 +786,101 @@ begin
 
 				state_new <= st_fin1;
 
+			-- ******************
+			-- CMD_READ_FLASH_ISP
+			-- ******************
+
+			when st_ispreadflash1 =>
+				-- Get number of receive bytes
+				numrx_next(15 downto 8) := unsigned(ringdata);
+				ringptr_next := ringptr + "1";
+
+				-- Write status OK
+				txaddr <= "000" & X"06";
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				state_new <= st_ispreadflash2;
+
+			when st_ispreadflash2 =>
+				-- Get number of receive bytes
+				numrx_next(7 downto 0) := unsigned(ringdata);
+				ringptr_next := ringptr + "1";
+
+				state_new <= st_ispreadflash3;
+
+			when st_ispreadflash3 =>
+				spicount_next := (others => '0');
+				-- use 'target' to store the current command to send
+				target_next := ringdata;
+				state_new <= st_ispreadflash_cmd;
+
+				-- Write second status OK after received data
+				-- TODO make a test to check there's no overflow here
+				txaddr <= "00" & std_logic_vector(('0' & numrx(7 downto 0)) + x"07");
+				txdata <= STATUS_CMD_OK;
+				txwr <= '1';
+				msgbodylen_next := msgbodylen + "1";
+
+				-- Add three (cmd + 2 oks) to numrx so it can be compared with msgbodylen
+				-- Subtract one more so can be compared w/ msgbodylen and not msgbodylen_next
+				numrx_next := numrx_next + x"0002";
+
+			when st_ispreadflash_cmd =>
+				spidata_next := target;
+				-- Strobe in the next command
+				spistrobe_next := '1';
+				-- Toggle between MSB and LSB command
+				target_next(3) := not target_next(3);
+				state_new <= st_ispreadflash_cmdwait;
+				-- Wait for busy state
+			when st_ispreadflash_cmdwait =>
+				if spistrobe = '0' and spibusy = '0' then
+					state_new <= st_ispreadflash_msb;
+				end if;
+
+			when st_ispreadflash_msb =>
+				spidata_next := std_logic_vector(stk_memaddr(15 downto 8));
+				spistrobe_next := '1';
+				state_new <= st_ispreadflash_msbwait;
+			when st_ispreadflash_msbwait =>
+				if spistrobe = '0' and spibusy = '0' then
+					state_new <= st_ispreadflash_lsb;
+				end if;
+
+			when st_ispreadflash_lsb =>
+				spidata_next := std_logic_vector(stk_memaddr(7 downto 0));
+				spistrobe_next := '1';
+				state_new <= st_ispreadflash_lsbwait;
+				-- if switching back to LSB, increment address counter as well
+				-- i.e., read the LSB first
+				if target(3) = '0' then
+					stk_memaddr_next := stk_memaddr + "1";
+				end if;
+			when st_ispreadflash_lsbwait =>
+				if spistrobe = '0' and spibusy = '0' then
+					state_new <= st_ispreadflash_dat;
+				end if;
+
+			when st_ispreadflash_dat =>
+				spidata_next := x"00";
+				spistrobe_next := '1';
+				state_new <= st_ispreadflash_datwait;
+
+			when st_ispreadflash_datwait =>
+				txdata <= shifter;
+				txaddr <= '0' & std_logic_vector(msgbodylen(9 downto 0) + x"04");
+				if spistrobe = '0' and spibusy = '0' then
+					txwr <= '1';
+					msgbodylen_next := msgbodylen + "1";
+					if msgbodylen = numrx then
+						state_new <= st_fin1;
+					else
+						state_new <= st_ispreadflash_cmd;
+					end if;
+				end if;
+
 			-- **********************
 			-- CMD_SPI_MULTI
 			-- **********************
@@ -767,7 +899,7 @@ begin
 
 			when st_ispmulti2 =>
 				-- Get number of receive bytes
-				numrx_next := unsigned(ringdata);
+				numrx_next := x"00" & unsigned(ringdata);
 				ringptr_next := ringptr + "1";
 
 				state_new <= st_ispmulti3;
@@ -775,7 +907,7 @@ begin
 			when st_ispmulti3 =>
 				-- Write second status OK after received data
 				-- TODO make a test to check there's no overflow here
-				txaddr <= "00" & std_logic_vector(('0' & numrx) + x"07");
+				txaddr <= "00" & std_logic_vector(('0' & numrx(7 downto 0)) + x"07");
 				txdata <= STATUS_CMD_OK;
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
@@ -816,7 +948,7 @@ begin
 
 					-- Write the byte received from the device to the response buffer
 					if spicount >= unsigned(target) then
-						txaddr <= '0' & std_logic_vector(('0' & spicount) - unsigned(target) + x"07");
+						txaddr <= '0' & std_logic_vector(('0' & spicount(8 downto 0)) - unsigned(target) + x"07");
 						txwr <= '1';
 						msgbodylen_next := msgbodylen + "1";
 					end if;
@@ -896,6 +1028,7 @@ begin
 		stk_rst_polarity_new <= stk_rst_polarity_next;
 		stk_init_new <= stk_init_next;
 		stk_sck_duration_new <= stk_sck_duration_next;
+		stk_memaddr_new <= stk_memaddr_next;
 
 		isp_regs_new <= isp_regs_next;
 		isp_idx_new <= isp_idx_next;
