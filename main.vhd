@@ -1,7 +1,5 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use ieee.std_logic_arith.all ;
-use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
@@ -20,8 +18,11 @@ entity main is
 		MISO : IN STD_LOGIC;
 		MOSI : OUT STD_LOGIC;
 		SCK : OUT STD_LOGIC;
+		DEVPWR : OUT STD_LOGIC;
+		DEVRST : OUT STD_LOGIC;
 		RST : IN STD_LOGIC;
 		CLK : in  STD_LOGIC;
+		BTN : IN STD_LOGIC_VECTOR(4 downto 0);
 		LED : OUT STD_LOGIC_VECTOR(7 downto 0) );
 end main;
 
@@ -57,11 +58,17 @@ architecture Behavioral of main is
 	-- synchronizers
 	signal syncrx, syncmiso : std_logic;
 
+	signal devpwr_int : std_logic;
+	signal devrst_int : std_logic;
+
 begin
+
+	DEVPWR <= devpwr_int;
+	DEVRST <= devrst_int;
 
 	led(7) <= tubusy;
 	led(6) <= dtbusy;
-	led(5) <= '0';
+	led(5) <= devpwr_int;
 	led(0) <= rxfrerror;
 	led(1) <= readfsmerr;
 	led(2) <= dispatcherr;
@@ -71,7 +78,7 @@ begin
 	u0 : synchronizer port map(RxD, syncrx, CLK, RST);
 	u1 : uartrx port map (syncrx, urstrobe, urdata, rxfrerror, CLK, RST);
 	u2 : readfsm port map(urstrobe, urdata, rdaddr, rddata, rdstrobe, readfsmerr, readtokenerr, CLK, RST);
-	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, syncmiso, MOSI, SCK, dispatcherr, dispatchbusy, CLK, RST);
+	u3 : dispatch port map(rdaddr, rddata, rdstrobe, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, syncmiso, MOSI, SCK, devpwr_int, devrst_int, dispatcherr, dispatchbusy, CLK, RST);
 	u7 : synchronizer port map(MISO, syncmiso, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);

@@ -43,6 +43,8 @@ package dispatch_pkg is
 			MISO      : in  std_logic;
 			MOSI      : out std_logic;
 			SCK       : out std_logic;
+			DEVPWR    : out std_logic;
+			DEVRST    : out std_logic;
 			-- Error flags
 			procerr   : out std_logic;
 			busyerr   : out std_logic;
@@ -76,6 +78,8 @@ entity dispatch is
 		MISO      : in  std_logic;
 		MOSI      : out std_logic;
 		SCK       : out std_logic;
+		DEVPWR    : out std_logic;
+		DEVRST    : out std_logic;
 		procerr   : out std_logic;
 		busyerr   : out std_logic;
 		clk      : in STD_LOGIC;
@@ -94,9 +98,10 @@ architecture Behavioral of dispatch is
 	    st_setparam1, st_setparam2,
 		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4,
 	    st_signon1, st_signon2, st_signon3,
-	    st_ispinit1, st_ispinit2, st_ispfin1,
+	    st_ispinit1, st_ispinit2, st_ispinit3, st_ispinit4, st_ispinit5, st_ispinittx, st_ispinitwait, st_ispinitchk,
+		st_ispfin1, st_ispfin2, st_ispfin3,
 		st_isperase1, st_isperase2, st_isperase3, st_isperasetx, st_isperasewait,
-	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3,
+	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3
 	    st_ispreadflash_cmd, st_ispreadflash_msb, st_ispreadflash_lsb, st_ispreadflash_dat,
 	    st_ispreadflash_cmdwait, st_ispreadflash_msbwait, st_ispreadflash_lsbwait, st_ispreadflash_datwait,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
@@ -179,7 +184,10 @@ architecture Behavioral of dispatch is
 	signal timer_set, timer_set_new : std_logic;
 	signal timer_busy : std_logic;
 
+	signal devpwr_int, devpwr_new : std_logic;
 begin
+
+	DEVPWR <= devpwr_int;
 
 	-- ****************
 	-- Timer Subprocess
@@ -410,6 +418,8 @@ begin
 			spistrobe <= '0';
 
 			timer_set <= '0';
+
+			devpwr_int <= '0';
 		elsif rising_edge(clk) then
 			state <= state_new;
 
@@ -436,6 +446,8 @@ begin
 			spistrobe <= spistrobe_new;
 
 			timer_set <= timer_set_new;
+
+			devpwr_int <= devpwr_new;
 		end if;
 	end process;
 
@@ -444,7 +456,7 @@ begin
 	--      by transmitting a ANSWER_CKSUM_ERROR response and resetting
 	--      the ReadFSM.
 
-	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, stk_memaddr, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter, timer_set, timer_busy)
+	main_comb_proc : process(state, cmdstrobe, msgbodylen, ringptr, ringdata, packetlen, packetptr, strlen, txbusy, target, stk_rst_polarity, stk_init, stk_sck_duration, stk_memaddr, isp_regs, isp_idx, numrx, numtx, spicount, spidata, spistrobe, spibusy, shifter, timer_set, timer_busy, devpwr_int)
 		variable msgbodylen_next : unsigned(15 downto 0);
 		variable ringptr_next : unsigned(10 downto 0);
 		variable packetptr_next : unsigned(10 downto 0);
@@ -463,6 +475,7 @@ begin
 		variable spistrobe_next : std_logic;
 		variable numtx_next : unsigned(7 downto 0);
 		variable numrx_next : unsigned(15 downto 0);
+		variable devpwr_next : std_logic;
 	begin
 		-- Pipelined signals
 		msgbodylen_next := msgbodylen;
@@ -489,8 +502,10 @@ begin
 
 		txstrobe_next := '0';
 
+		devpwr_next := devpwr_int;
 
 		-- Non-pipelined signals
+		DEVRST <= '0';
 		state_new <= state;
 		txaddr <= (others => '0');
 		txdata <= (others => '0');
@@ -794,25 +809,89 @@ begin
 				isp_regs_next(to_integer(isp_idx)) := ringdata;
 				ringptr_next := ringptr + x"1";
 				if isp_idx = to_unsigned(isp_nregs-1,3) then
-					state_new <= st_ispmultitx;
+					state_new <= st_ispinit2;
 					msgbodylen_next := msgbodylen + "1";
 				else
 					isp_idx_next := isp_idx + x"1";
 				end if;
 
-				-- Write status OK
+			when st_ispinit2 =>
+				-- Turn on the device
+				devpwr_next := '1';
+
+				-- Set up a delay of stabDelay milliseconds
+				target_next := isp_regs(0);
+				timer_set_new <= '1';
+				state_new <= st_ispinit3;
+
+				-- Rewind the ring pointer to the start of the 4 command bytes
+				ringptr_next := ringptr - x"1";
+
+			when st_ispinit3 =>
+				target_next := x"80";  -- RESET delay will be 128 ms
+				if timer_set = '0' and timer_busy = '0' then
+					timer_set_new <= '1';
+					state_new <= st_ispinit4;
+				end if;
+
+			when st_ispinit4 =>
+				target_next := x"14";  -- post-RESET delay will be 20 ms
+				DEVRST <= '1';
+				if timer_set = '0' and timer_busy = '0' then
+					timer_set_new <= '1';
+					state_new <= st_ispinit5;
+				end if;
+
+			when st_ispinit5 =>
+				spicount_next := (others => '0');
+				if timer_set = '0' and timer_busy = '0' then
+					state_new <= st_ispinittx;
+					-- Advance the ring pointer so that the data will be available when needed
+					ringptr_next := ringptr + x"1";
+				end if;
+
+			when st_ispinittx =>
+				spidata_next := ringdata;
+
+				if spicount >= x"04" then
+					state_new <= st_ispinitchk;
+				else
+					spistrobe_next := '1';
+					state_new <= st_ispinitwait;
+				end if;
+
+			when st_ispinitwait =>
+				if spistrobe = '1' or spibusy = '1' then
+					state_new <= st_ispinitwait;
+				else
+					spicount_next := spicount + "1";
+
+					-- Check the poll value
+					if spicount_next = unsigned(isp_regs(6)) then
+						target_next := shifter;
+					end if;
+
+					-- Advance the ring pointer. Data will still be available
+					-- for the one cycle spent in the tx state
+					ringptr_next := ringptr + "1";
+
+					state_new <= st_ispinittx;
+				end if;
+
+			when st_ispinitchk =>
+				-- Write status
 				txaddr <= "000" & X"06";
-				txdata <= STATUS_CMD_OK;
 				txwr <= '1';
+				txdata <= STATUS_CMD_OK;
 
-				-- Set up a CMD_SPI_MULTI
-				numtx_next := x"04";
-				numrx_next := x"0000";
-				target_next := x"00";
+				-- Check if polling is required
+				if isp_regs(6) /= x"00" and target /= isp_regs(5) then
+					txdata <= STATUS_CMD_FAILED;
+				end if;
 
-				-- TODO do error checking, using pollValue and pollIndex register
-				-- TODO this state should drive POWER and RESET pins to enter and
-				--      exit programming state
+				-- Send a response
+				state_new <= st_fin1;
+
 				-- TODO meaning of stabDelay, cmdexecDelay, synchLoops, byteDelay?
 				--      * Does byteDelay only apply to the ENTER command bytes?
 				--      * Is stabDelay the delay from power on to start SPI communication?
@@ -829,7 +908,25 @@ begin
 				txwr <= '1';
 				msgbodylen_next := msgbodylen + "1";
 
-				state_new <= st_fin1;
+				-- Set up a pre-power-off delay
+				target_next := ringdata;
+				timer_set_new <= '1';
+				state_new <= st_ispfin2;
+
+			when st_ispfin2 =>
+				-- Set up a post-power-off delay
+				target_next := ringdata;
+				if timer_set = '0' and timer_busy = '0' then
+					-- Turn off, and start the timer again
+					devpwr_next := '0';
+					timer_set_new <= '1';
+					state_new <= st_ispfin3;
+				end if;
+
+			when st_ispfin3 =>
+				if timer_set = '0' and timer_busy = '0' then
+					state_new <= st_fin1;
+				end if;
 
 			-- ******************
 			-- CMD_CHIP_ERASE_ISP
@@ -1140,6 +1237,8 @@ begin
 		spicount_new <= spicount_next;
 		spidata_new <= spidata_next;
 		spistrobe_new <= spistrobe_next;
+
+		devpwr_new <= devpwr_next;
 	end process;
 
 end Behavioral;
