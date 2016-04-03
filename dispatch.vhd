@@ -101,7 +101,7 @@ architecture Behavioral of dispatch is
 	    st_ispinit1, st_ispinit2, st_ispinit3, st_ispinit4, st_ispinit5, st_ispinittx, st_ispinitwait, st_ispinitchk,
 		st_ispfin1, st_ispfin2, st_ispfin3,
 		st_isperase1, st_isperase2, st_isperase3, st_isperasetx, st_isperasewait,
-	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3
+	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3,
 	    st_ispreadflash_cmd, st_ispreadflash_msb, st_ispreadflash_lsb, st_ispreadflash_dat,
 	    st_ispreadflash_cmdwait, st_ispreadflash_msbwait, st_ispreadflash_lsbwait, st_ispreadflash_datwait,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
