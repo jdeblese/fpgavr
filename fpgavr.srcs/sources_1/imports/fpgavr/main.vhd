@@ -1,5 +1,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 library UNISIM;
 use UNISIM.VComponents.all;
@@ -20,6 +21,7 @@ entity main is
 		SCK : OUT STD_LOGIC;
 		DEVPWR : OUT STD_LOGIC;
 		DEVRST : OUT STD_LOGIC;
+		DEVCLK : OUT STD_LOGIC;
 		RST : IN STD_LOGIC;
 		CLK : in  STD_LOGIC;
 		BTN : IN STD_LOGIC_VECTOR(4 downto 0);
@@ -63,8 +65,8 @@ architecture Behavioral of main is
 
 begin
 
-	DEVPWR <= devpwr_int;
-	DEVRST <= devrst_int;
+	DEVPWR <= devpwr_int or btn(0);
+	DEVRST <= devrst_int or btn(1);
 
 	led(7) <= tubusy;
 	led(6) <= dtbusy;
@@ -82,5 +84,22 @@ begin
 	u7 : synchronizer port map(MISO, syncmiso, CLK, RST);
 	u4 : fsm_stktx port map(tustrobe, tudata, tubusy, dtaddr, dtdata, dtwr, dtstrobe, dtbusy, CLK, RST);
 	u5 : uarttx port map(TxD, tustrobe, tudata, tubusy, CLK, RST);
+
+    -- Provide a clock in case the AVR requires an external clock
+	process(clk)
+        variable count : unsigned(3 downto 0);
+    begin
+        if rising_edge(clk) then
+            if count = x"b" then
+                count := (others => '0');
+                DEVCLK <= '0';
+            else
+                if count = x"5" then
+                    DEVCLK <= '1';
+                end if;
+                count := count + "1";
+            end if;
+        end if;
+    end process;
 
 end Behavioral;

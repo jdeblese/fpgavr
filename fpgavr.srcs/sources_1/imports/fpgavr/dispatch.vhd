@@ -96,14 +96,15 @@ architecture Behavioral of dispatch is
 	    st_storeseq, st_getlenhi, st_getlenlo,
 	    st_getparam1, st_getparam2,
 	    st_setparam1, st_setparam2,
-		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4,
+		st_loadaddr1, st_loadaddr2, st_loadaddr3, st_loadaddr4, 
 	    st_signon1, st_signon2, st_signon3,
 	    st_ispinit1, st_ispinit2, st_ispinit3, st_ispinit4, st_ispinit5, st_ispinittx, st_ispinitwait, st_ispinitchk,
 		st_ispfin1, st_ispfin2, st_ispfin3,
-		st_isperase1, st_isperase2, st_isperase3, st_isperasetx, st_isperasewait,
-	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3,
+		st_isperase1, st_isperase2, st_isperase3, st_isperasetx, st_isperasewait, 
+	    st_ispreadflash1, st_ispreadflash2, st_ispreadflash3, 
 	    st_ispreadflash_cmd, st_ispreadflash_msb, st_ispreadflash_lsb, st_ispreadflash_dat,
 	    st_ispreadflash_cmdwait, st_ispreadflash_msbwait, st_ispreadflash_lsbwait, st_ispreadflash_datwait,
+		st_ispprogflash1,
 	    st_ispreadsig1, st_ispreadsig2, st_ispreadsig3,
 		st_ispmulti1, st_ispmulti2, st_ispmulti3, st_ispmultitx, st_ispmultiwait,
 	    st_fin1, st_fin2, st_fin3, st_fin4);
@@ -444,7 +445,7 @@ begin
 			spicount <= spicount_new;
 			spidata <= spidata_new;
 			spistrobe <= spistrobe_new;
-
+			
 			timer_set <= timer_set_new;
 
 			devpwr_int <= devpwr_new;
@@ -592,6 +593,7 @@ begin
 					when CMD_LEAVE_PROGMODE_ISP => state_new <= st_ispfin1;
 					when CMD_CHIP_ERASE_ISP => state_new <= st_isperase1;
 					when CMD_READ_FLASH_ISP => state_new <= st_ispreadflash1;
+					when CMD_PROGRAM_FLASH_ISP => state_new <= st_ispprogflash1;
 					when CMD_SPI_MULTI => state_new <= st_ispmulti1;
 --					when CMD_READ_SIGNATURE_ISP => state_new <= st_ispreadsig1;
 					when others => state_new <= st_cmdunknown;
@@ -928,9 +930,9 @@ begin
 					state_new <= st_fin1;
 				end if;
 
-			-- ******************
+			-- **********************
 			-- CMD_CHIP_ERASE_ISP
-			-- ******************
+			-- **********************
 			when st_isperase1 =>
 				-- Write status OK
 				txaddr <= "000" & X"06";
@@ -1078,6 +1080,10 @@ begin
 						state_new <= st_ispreadflash_cmd;
 					end if;
 				end if;
+
+			-- *********************
+			-- CMD_PROGRAM_FLASH_ISP
+			-- *********************
 
 			-- **********************
 			-- CMD_SPI_MULTI
